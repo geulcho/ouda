@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta id="vp" name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+/* ?w=375 처럼 폭을 지정하면 그 폭의 폰인 척한다.
+   헤드리스 크롬은 창을 485px 아래로 못 줄여서, 레이아웃 뷰포트를 직접 고정한다. */
+(function () {
+  var m = location.search.match(/[?&]w=(\d+)/);
+  if (m) document.getElementById('vp').setAttribute('content', 'width=' + m[1] + ', initial-scale=1');
+})();
+</script>
+<title>mobile check</title>
+<link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">독일어 트레이너 <span class="sub">Goethe A1–B1</span></div>
+  <nav id="nav">
+    <button data-view="home" class="on">홈</button>
+    <button data-view="study">학습</button>
+    <button data-view="wrong">오답노트</button>
+    <button data-view="words">단어장</button>
+    <button data-view="meanings">뜻 채우기</button>
+    <button data-view="tables">참고 표</button>
+    <button data-view="stats">통계</button>
+    <button data-view="settings">설정</button>
+  </nav>
+</header>
+<main id="app"></main>
+<pre id="report"></pre>
+
+<script src="../data/nouns.js"></script>
+<script src="../data/verbs.js"></script>
+<script src="../data/adjectives.js"></script>
+<script src="../data/functionwords.js"></script>
+<script src="../data/grammar.js"></script>
+<script src="../data/pronouns.js"></script>
+<script src="../data/sentences.js"></script>
+<script src="../data/prefixes.js"></script>
+<script src="../data/prefixverbs.js"></script>
+<script src="../js/declension.js"></script>
+<script src="../js/conjugation.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/srs.js"></script>
+<script src="../js/grader.js"></script>
+<script src="../js/drills.js"></script>
+<script src="../js/grammar-drills.js"></script>
+<script src="../js/order-drills.js"></script>
+<script src="../js/wordorder.js"></script>
+<script src="../js/wordorder-drills.js"></script>
+<script src="../js/meaning-drills.js"></script>
+<script src="../js/prefix.js"></script>
+<script src="../js/prefix-drills.js"></script>
+<script src="../js/editor.js"></script>
+<script src="../js/meanings.js"></script>
+<script src="../js/tables.js"></script>
+<script src="../js/stats.js"></script>
+<script src="../js/sync.js"></script>
+<script src="../js/ui.js"></script>
+
+<script>
+/*
+ * 폰 화면에서 레이아웃이 깨지는지 잰다.
+ * 가로 스크롤이 생기면 한 손으로 못 쓴다 — 그게 제일 흔한 모바일 사고다.
+ */
+var out = [];
+function say(s) { out.push(s); }
+
+function overflow() {
+  var doc = document.documentElement;
+  return doc.scrollWidth - doc.clientWidth;
+}
+
+/** 화면 밖으로 튀어나간 요소 찾기 (가로 스크롤 컨테이너 안은 정상) */
+function offenders() {
+  var w = document.documentElement.clientWidth;
+  var bad = [];
+  document.querySelectorAll('#app *').forEach(function (n) {
+    var r = n.getBoundingClientRect();
+    if (r.width === 0) return;
+    if (r.right <= w + 1 && r.left >= -1) return;
+    // 스스로 가로 스크롤을 갖는 조상이 있으면 의도된 것
+    for (var p = n.parentNode; p && p.nodeType === 1; p = p.parentNode) {
+      var st = getComputedStyle(p);
+      if (st.overflowX === 'auto' || st.overflowX === 'scroll') return;
+    }
+    bad.push(n.tagName.toLowerCase() + (n.className ? '.' + String(n.className).split(' ')[0] : '') +
+             '  [' + Math.round(r.left) + '~' + Math.round(r.right) + ']');
+  });
+  return bad;
+}
+
+/** 터치 대상이 너무 작지 않은지 */
+function smallTargets() {
+  var bad = [];
+  document.querySelectorAll('#app button, #nav button, #app input[type=text]').forEach(function (n) {
+    var r = n.getBoundingClientRect();
+    if (r.height > 0 && r.height < 40) {
+      bad.push((n.textContent || n.placeholder || n.tagName).trim().slice(0, 18) +
+               ' = ' + Math.round(r.height) + 'px');
+    }
+  });
+  return bad;
+}
+
+/** iOS 는 16px 미만 입력칸에서 화면을 확대해 버린다 */
+function smallFonts() {
+  var bad = [];
+  document.querySelectorAll('#app input[type=text], #app select, #app textarea').forEach(function (n) {
+    var fs = parseFloat(getComputedStyle(n).fontSize);
+    if (fs < 16) bad.push((n.placeholder || n.tagName) + ' = ' + fs + 'px');
+  });
+  return bad;
+}
+
+function nav(v) {
+  var b = document.querySelector('#nav button[data-view="' + v + '"]');
+  if (b) b.click();
+}
+
+setTimeout(function () {
+  say('화면 폭 ' + document.documentElement.clientWidth + 'px');
+
+  ['home', 'study', 'words', 'meanings', 'prefixes', 'tables', 'stats', 'settings'].forEach(function (v) {
+    nav(v);
+    var ov = overflow();
+    var off = offenders();
+    var st = smallTargets();
+    var sf = smallFonts();
+    var line = '  ' + v.padEnd(9) + ' 가로넘침 ' + (ov > 1 ? ov + 'px  ✗' : '없음');
+    if (off.length) line += '  | 튀어나온 요소 ' + off.length;
+    if (st.length) line += '  | 작은 버튼 ' + st.length;
+    if (sf.length) line += '  | 작은 글꼴 ' + sf.length;
+    say(line);
+    if (off.length) say('      ' + off.slice(0, 3).join(' , '));
+    if (st.length) say('      ' + st.slice(0, 3).join(' , '));
+    if (sf.length) say('      ' + sf.slice(0, 3).join(' , '));
+  });
+
+  // 하단 탭바가 실제로 아래에 붙었는지
+  nav('home');
+  var navEl = document.getElementById('nav');
+  var ns = getComputedStyle(navEl);
+  say('하단 탭바: position=' + ns.position + (ns.position === 'fixed' ? '  (폰 모드)' : '  (데스크톱 모드)'));
+
+  document.getElementById('report').textContent = out.join('\n');
+}, 400);
+</script>
+</body>
+</html>

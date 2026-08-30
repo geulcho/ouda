@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#11131a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Öuda">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>Öuda — 독일어 어휘 · 어순 · 문법</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="logo"><i class="d1"></i><i class="d2"></i><b>O</b></span><span class="bname">uda</span><span class="sub">Goethe A1–B2 · 어순 · 접두사</span></div>
+  <nav id="nav">
+    <button data-view="home"    class="on">홈</button>
+    <button data-view="study">학습</button>
+    <button data-view="wrong">오답노트</button>
+    <button data-view="words">단어장</button>
+    <button data-view="meanings">뜻 채우기</button>
+    <button data-view="prefixes">접두사</button>
+    <button data-view="tables">참고 표</button>
+    <button data-view="stats">통계</button>
+    <button data-view="settings">설정</button>
+  </nav>
+</header>
+
+<main id="app"><div class="loading">데이터를 불러오는 중…</div></main>
+
+<footer class="foot">
+  기록은 이 브라우저에만 저장됩니다. 설정 &gt; 백업에서 파일로 내려받아 두세요.
+</footer>
+
+<!--
+  주의: 이 앱은 file:// 로 직접 열리도록 만들었습니다.
+  그래서 ES 모듈(type="module")과 fetch() 를 쓰지 않습니다 — 둘 다 CORS 로 막힙니다.
+  데이터도 .json 이 아니라 window.X 를 선언하는 .js 로 불러옵니다.
+-->
+<!-- 동기화 설정 (선택). data/config.example.js 를 복사해 만듭니다. 없으면 로컬 전용. -->
+<script src="data/config.js"></script>
+<script src="data/nouns.js"></script>
+<script src="data/verbs.js"></script>
+<script src="data/adjectives.js"></script>
+<script src="data/functionwords.js"></script>
+<script src="data/grammar.js"></script>
+<script src="data/pronouns.js"></script>
+<script src="data/sentences.js"></script>
+<script src="data/prefixes.js"></script>
+<script src="data/prefixverbs.js"></script>
+
+<script src="js/declension.js"></script>
+<script src="js/conjugation.js"></script>
+<script src="js/store.js"></script>
+<script src="js/srs.js"></script>
+<script src="js/grader.js"></script>
+<script src="js/drills.js"></script>
+<script src="js/grammar-drills.js"></script>
+<script src="js/order-drills.js"></script>
+<script src="js/wordorder.js"></script>
+<script src="js/wordorder-drills.js"></script>
+<script src="js/meaning-drills.js"></script>
+<script src="js/prefix.js"></script>
+<script src="js/prefix-drills.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/meanings.js"></script>
+<script src="js/tables.js"></script>
+<script src="js/stats.js"></script>
+<script src="js/sync.js"></script>
+<script src="js/ui.js"></script>
+<script>
+/* 서비스워커는 https 에서만 등록된다. file:// 로 열었을 땐 조용히 넘어간다. */
+if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  });
+}
+</script>
+</body>
+</html>

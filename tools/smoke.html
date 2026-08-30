@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>smoke</title>
+<link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">smoke</div>
+  <nav id="nav">
+    <button data-view="home" class="on">홈</button>
+    <button data-view="study">학습</button>
+    <button data-view="wrong">오답노트</button>
+    <button data-view="words">단어장</button>
+    <button data-view="meanings">뜻 채우기</button>
+    <button data-view="prefixes">접두사</button>
+    <button data-view="tables">참고 표</button>
+    <button data-view="stats">통계</button>
+    <button data-view="settings">설정</button>
+  </nav>
+</header>
+<main id="app"></main>
+<pre id="report"></pre>
+
+<!-- 동기화 설정 (선택). data/config.example.js 를 복사해 만듭니다. 없으면 로컬 전용. -->
+<script src="../data/config.js"></script>
+<script src="../data/nouns.js"></script>
+<script src="../data/verbs.js"></script>
+<script src="../data/adjectives.js"></script>
+<script src="../data/functionwords.js"></script>
+<script src="../data/grammar.js"></script>
+<script src="../data/pronouns.js"></script>
+<script src="../data/sentences.js"></script>
+<script src="../data/prefixes.js"></script>
+<script src="../data/prefixverbs.js"></script>
+<script src="../js/declension.js"></script>
+<script src="../js/conjugation.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/srs.js"></script>
+<script src="../js/grader.js"></script>
+<script src="../js/drills.js"></script>
+<script src="../js/grammar-drills.js"></script>
+<script src="../js/order-drills.js"></script>
+<script src="../js/wordorder.js"></script>
+<script src="../js/wordorder-drills.js"></script>
+<script src="../js/meaning-drills.js"></script>
+<script src="../js/prefix.js"></script>
+<script src="../js/prefix-drills.js"></script>
+<script src="../js/editor.js"></script>
+<script src="../js/meanings.js"></script>
+<script src="../js/tables.js"></script>
+<script src="../js/stats.js"></script>
+<script src="../js/sync.js"></script>
+<script src="../js/ui.js"></script>
+
+<script>
+/* 실제 화면을 눌러 가며 한 바퀴 돌린다. 결과는 #report 에 찍는다. */
+var log = [], errs = [];
+var Store = window.Store;
+window.addEventListener('error', function (e) { errs.push('ERROR: ' + e.message); });
+
+function say(s) { log.push(s); }
+function nav(v) { document.querySelector('#nav button[data-view="' + v + '"]').click(); }
+function txt() { return document.getElementById('app').innerText.replace(/\s+/g, ' ').trim(); }
+
+setTimeout(function () {
+  try {
+    say('홈: ' + txt().slice(0, 60));
+
+    // 각 화면이 뜨는지
+    ['words', 'stats', 'settings', 'wrong', 'home'].forEach(function (v) {
+      nav(v);
+      var t = txt();
+      say(v + ': ' + (t ? t.slice(0, 55) : '(빈 화면)'));
+    });
+
+    // 단어장에서 행을 눌러 뜻을 직접 입력할 수 있는가
+    nav('words');
+    (function () {
+      var row = document.querySelector('#listhost table.list tr:nth-child(2)');
+      if (!row) { say('단어장: 행이 없음'); return; }
+      say('단어장 첫 행: ' + row.innerText.replace(/\s+/g, ' ').trim().slice(0, 40));
+      row.click();
+      var ed = document.querySelector('tr.editrow');
+      if (!ed) { say('편집 패널: 안 열림 (버그)'); return; }
+      var labels = [].map.call(ed.querySelectorAll('.field label'),
+                               function (l) { return l.textContent; });
+      say('편집 칸: ' + labels.join(' / '));
+      var koIn = null;
+      [].forEach.call(ed.querySelectorAll('.field'), function (f) {
+        if (f.querySelector('label').textContent.indexOf('한국어') >= 0) {
+          koIn = f.querySelector('input');
+        }
+      });
+      if (!koIn) { say('뜻(한국어) 입력칸: 없음 (버그)'); return; }
+      koIn.value = '내가적은뜻';
+      var saveBtn = null;
+      [].forEach.call(ed.querySelectorAll('button'), function (b) {
+        if (b.textContent === '저장') saveBtn = b;
+      });
+      if (!saveBtn) { say('저장 버튼 없음 (버그)'); return; }
+      saveBtn.click();
+      Store.saveNow();
+      var st = JSON.parse(localStorage.getItem('deutsch-trainer') || 'null');
+      var ids = st ? Object.keys(st.edits || {}) : [];
+      say('단어장 저장: ' + ids.length + '건 → ' +
+          (ids.length ? ids[0] + ' ' + JSON.stringify(st.edits[ids[0]].ko) : '없음'));
+    })();
+
+    // 설정 체크박스가 실제 설정값을 반영하는가
+    // (el() 이 checked:null 을 속성으로 넣어 전부 체크돼 보이던 버그가 있었다)
+    nav('settings');
+    (function () {
+      var boxes = document.querySelectorAll('#app input[type=checkbox]');
+      var on = 0;
+      boxes.forEach(function (b) { if (b.checked) on++; });
+      say('설정 체크박스: ' + boxes.length + '개 중 ' + on + '개 체크');
+      if (on === boxes.length) say('  ! 전부 체크됨 — 상태가 반영 안 되는 중일 수 있음');
+      var st = Store.settings();
+      var before = st.germanOrder;
+      boxes[0].click();
+      var after = Store.settings().germanOrder;
+      say('  첫 항목 클릭: ' + before + ' → ' + after + (before === after ? '  ! 안 바뀜 (버그)' : ''));
+      document.querySelectorAll('#app input[type=checkbox]')[0].click();
+    })();
+
+    // 참고 표 — 렌더와 빈칸 채우기 채점
+    nav('tables');
+    (function () {
+      var tbls = document.querySelectorAll('table.ref');
+      say('참고 표: ' + tbls.length + '개 표 렌더');
+      if (!tbls.length) { say('  ! 표가 안 나옴 (버그)'); return; }
+      var first = tbls[0];
+      say('  첫 표: ' + first.rows[0].innerText.replace(/\s+/g, ' ').trim() +
+          ' / ' + first.rows[1].innerText.replace(/\s+/g, ' ').trim());
+
+      // 빈칸 모드로 전환
+      var cb = null;
+      document.querySelectorAll('.filters input[type=checkbox]').forEach(function (c) { cb = c; });
+      if (!cb) { say('  ! 빈칸 토글 없음'); return; }
+      // 사용자가 실제로 누르는 경로로 확인해야 한다.
+      // .checked 를 직접 건드리면 el() 의 속성 처리 버그 같은 걸 놓친다.
+      if (cb.checked) { say('  ! 켜기 전인데 이미 체크돼 있음 (버그)'); }
+      cb.click();
+      var qin = document.querySelectorAll('table.ref.quiz input');
+      if (!qin.length) { say('  ! 빈칸 입력칸 없음 (버그)'); return; }
+      say('  빈칸 모드: 입력칸 ' + qin.length + '개');
+      // 정답을 그대로 넣어 본다
+      qin.forEach(function (i) { i.value = i.getAttribute('data-want'); });
+      var gradeBtn = null;
+      document.querySelectorAll('.card.tbl .actions button').forEach(function (b) {
+        if (!gradeBtn && b.textContent === '채점') gradeBtn = b;
+      });
+      gradeBtn.click();
+      var fb = document.querySelector('.card.tbl .fb');
+      say('  정답 입력 채점: ' + (fb ? fb.innerText.replace(/\s+/g, ' ').trim() : '(결과 없음)'));
+      var cb2 = document.querySelector('.filters input[type=checkbox]');
+      if (cb2) cb2.click();   // 원상 복구
+    })();
+
+    // 뜻 채우기 전용 페이지 — Enter 로 저장하고 다음 단어로 넘어가는가
+    nav('meanings');
+    (function () {
+      var head = txt().slice(0, 70);
+      var inp = document.querySelector('.meaninput.big');
+      if (!inp) { say('뜻채우기: 입력칸 없음 (버그)'); return; }
+      var w1 = document.querySelector('.mhead').innerText.trim();
+      say('뜻채우기: ' + head);
+      say('  1번째 단어: ' + w1 + ' (레벨 A1 부터여야 함)');
+      inp.value = 'ㄱㄱ뜻1';
+      inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      var w2El = document.querySelector('.mhead');
+      var w2 = w2El ? w2El.innerText.trim() : '(없음)';
+      say('  Enter 뒤 단어: ' + w2 + (w2 === w1 ? '  ! 안 넘어감 (버그)' : '  → 넘어감'));
+      Store.saveNow();
+      var st3 = JSON.parse(localStorage.getItem('deutsch-trainer'));
+      var saved = Object.keys(st3.edits).filter(function (k) {
+        return st3.edits[k].ko === 'ㄱㄱ뜻1';
+      });
+      say('  저장 확인: ' + (saved.length ? saved[0] : '저장 안 됨 (버그)'));
+      var focused = document.activeElement && document.activeElement.className.indexOf('meaninput') >= 0;
+      say('  포커스 유지: ' + (focused ? '예' : '아니오 (연속 입력이 불편해짐)'));
+    })();
+
+    // 뜻 테스트 — 실제로 버튼을 눌러서 확인한다.
+    // (예전에 체크박스 버그를 놓친 게 .checked 를 직접 건드려 클릭 경로를 건너뛴 탓이었다)
+    (function () {
+      nav('meanings');
+      var inp = document.querySelector('.meaninput.big');
+      var word = document.querySelector('.mhead').innerText.trim();
+      inp.value = 'ㄴㄴ뜻가, ㄴㄴ뜻나';        // 쉼표로 두 개
+      inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      nav('meanings');
+
+      var testBtn = null;
+      document.querySelectorAll('.actions button').forEach(function (b) {
+        if (!testBtn && b.textContent.indexOf('뜻 테스트 (독→뜻)') === 0) testBtn = b;
+      });
+      if (!testBtn) { say('뜻테스트: 시작 버튼 없음 (버그)'); return; }
+      testBtn.click();
+      say('뜻테스트: ' + txt().slice(0, 60));
+
+      function answer(v) {
+        var box = document.querySelector('.answer input[type=text]');
+        if (!box) return null;
+        box.value = v;
+        var sb = null;
+        document.querySelectorAll('.answer .actions button').forEach(function (b) {
+          if (b.textContent.indexOf('제출') === 0) sb = b;
+        });
+        if (sb) sb.click();
+        return document.querySelector('.fb');
+      }
+
+      // ① 쉼표로 적은 뜻 중 '마지막' 하나만 적어도 맞아야 한다.
+      //    무슨 단어가 나올지 모르니 화면에 뜬 표제어를 되짚어 뜻을 찾는다.
+      function meaningOf(prompt) {
+        var de = String(prompt || '').trim().replace(/^(der|die|das)\s+/, '');
+        var all = [].concat(window.NOUNS || [], window.VERBS || [],
+                            window.ADJECTIVES || [], window.FUNCTIONWORDS || [],
+                            // 전치사·접속사 같은 문법 항목도 뜻을 갖고 있어 출제된다
+                            window.GrammarDrills ? window.GrammarDrills.makeItems() : [],
+                            window.OrderDrills ? window.OrderDrills.makeItems() : [],
+                            window.WordOrderDrills ? window.WordOrderDrills.makeItems() : []);
+        var edits = Store.load().edits || {};
+        for (var i = 0; i < all.length; i++) {
+          if (all[i].de !== de) continue;
+          var ed = edits[all[i].id] || {};
+          var ko = (ed.ko !== undefined ? ed.ko : all[i].ko) || '';
+          var en = (ed.en !== undefined ? ed.en : all[i].en) || '';
+          var list = (ko + ',' + en).split(',').map(function (x) { return x.trim(); })
+                       .filter(Boolean);
+          if (list.length) return list;
+        }
+        return null;
+      }
+
+      function shownWord() {
+        var p = document.querySelector('.q.prompt') || document.querySelector('.prompt');
+        return p ? p.innerText.trim() : '';
+      }
+      function nextQ() {
+        var b = null;
+        document.querySelectorAll('.actions button').forEach(function (x) {
+          if (!b && x.textContent.indexOf('다음') === 0) b = x;
+        });
+        if (b) { b.click(); return true; }
+        var skip = null;
+        document.querySelectorAll('.answer .actions button').forEach(function (x) {
+          if (x.textContent.indexOf('모르겠음') === 0) skip = x;
+        });
+        if (skip) { skip.click(); return nextQ(); }
+        return false;
+      }
+
+      // 뜻이 여러 개인 단어가 나올 때까지 넘긴다 — 그게 이 기능의 핵심이라 꼭 확인해야 한다
+      var shown = '', list = null;
+      for (var t2 = 0; t2 < 12; t2++) {
+        shown = shownWord();
+        list = meaningOf(shown);
+        if (list && list.length > 1) break;
+        if (!nextQ()) break;
+      }
+      if (!list || list.length < 2) {
+        say('  뜻 여러 개인 단어를 12번 안에 못 만남 (' + shown + ')');
+      } else {
+        var last = list[list.length - 1];
+        var fb = answer(last);
+        say('  "' + shown + '" 뜻 ' + list.length + '개 중 마지막 "' + last + '" 만 적음: ' +
+            (fb && fb.className.indexOf('right') >= 0 ? '정답 처리' : '오답 처리 (버그)'));
+      }
+
+      // ② 답지에 없는 답 → 인정 버튼이 나오고, 눌러서 정답이 되는가
+      nextQ();
+      var fb2 = answer('ㄷㄷ엉뚱한답');
+      var aliasBtn = document.querySelector('.aliasbox button');
+      say('  답지에 없는 답: ' + (fb2 && fb2.className.indexOf('wrong') >= 0 ? '오답 처리' : '?') +
+          ' · 인정 버튼 ' + (aliasBtn ? '있음' : '없음 (버그)'));
+      if (aliasBtn) {
+        aliasBtn.click();
+        var fb3 = document.querySelector('.fb');
+        say('  인정 누른 뒤: ' + (fb3 && fb3.className.indexOf('right') >= 0
+              ? '정답으로 바뀜' : '안 바뀜 (버그)'));
+        Store.saveNow();
+        var st4 = JSON.parse(localStorage.getItem('deutsch-trainer'));
+        var found = Object.keys(st4.aliases || {}).some(function (k) {
+          return st4.aliases[k].indexOf('ㄷㄷ엉뚱한답') >= 0;
+        });
+        say('  답지 저장: ' + (found ? '들어감' : '안 들어감 (버그)'));
+      }
+    })();
+
+    // 통계 — 뜻 관련 항목과 레벨 집계
+    (function () {
+      nav('stats');
+      var t = txt();
+      ['뜻 채우기 진척', '뜻을 적은 추이', '뜻 테스트 성적', '뜻 테스트에서 자주 틀리는',
+       '접두사 동사 — 지금 할 일', '접두사별 정답률', '의미 투명도별 정답률',
+       '뜻 ↔ 활용, 어느 쪽이 약한가']
+        .forEach(function (h) {
+          if (t.indexOf(h) < 0) say('통계: "' + h + '" 없음 (버그)');
+        });
+      say('통계 절: 뜻 4개 + 접두사 4개 모두 표시됨');
+
+      // 표 헤더가 행 위로 떠다니면 안 된다 (position:sticky 를 통계 표에 주면 그렇게 된다)
+      var floating = [];
+      document.querySelectorAll('table.list').forEach(function (tb) {
+        var th = tb.querySelector('th');
+        if (!th) return;
+        var pos = getComputedStyle(th).position;
+        if (pos === 'sticky' && !tb.classList.contains('sticky')) floating.push(pos);
+      });
+      say('  표 헤더 고정: ' + (floating.length ? floating.length + '개 표에서 떠 있음 (버그)'
+                                              : '단어장에만 적용됨'));
+
+      // 성별 집계 내부 들여다보기
+      (function () {
+        var rows = [];
+        Stats.seenCards().forEach(function (x) {
+          if (Stats.GENDER_DRILLS.indexOf(x.drill) < 0) return;
+          rows.push(x.id + '|' + x.drill + ' seen=' + JSON.stringify(x.card.seen) +
+                    ' wrong=' + JSON.stringify(x.card.wrong));
+        });
+        say('  성 관련 카드 ' + rows.length + '장');
+        rows.slice(0, 10).forEach(function (r) { say('    ' + r); });
+      })();
+
+      // 레벨별 — 누적 태그가 여러 레벨로 새지 않는지
+      var lv = Stats.byLevel(window.__W || []);
+      say('  레벨 집계 함수: ' + (lv.length === 4 ? 'A1~B2 4칸' : '이상 (' + lv.length + ')'));
+    })();
+
+    // 학습 중 뜻 적기 — 뜻이 비어 있으면 채점 화면에 입력칸이 나와야 한다
+    nav('study');
+    (function () {
+      // 어순 조립 문제가 걸리면 입력 방식이 달라 넘어간다. 몇 번 시도한다.
+      for (var tries = 0; tries < 5; tries++) {
+        var choice = document.querySelector('.choices button');
+        var textIn = document.querySelector('.answer input[type=text]');
+        if (choice) { choice.click(); break; }
+        if (textIn) {
+          textIn.value = 'zzz';
+          var sb = null;
+          document.querySelectorAll('.answer .actions button').forEach(function (b) {
+            if (b.textContent.indexOf('제출') === 0) sb = b;
+          });
+          if (sb) { sb.click(); break; }
+        }
+        // 조립형 — 모르겠음으로 넘긴다
+        var skip = null;
+        document.querySelectorAll('.answer .actions button').forEach(function (b) {
+          if (b.textContent.indexOf('모르겠음') === 0) skip = b;
+        });
+        if (!skip) break;
+        skip.click();
+        var nx = null;
+        document.querySelectorAll('.card > .actions button').forEach(function (b) {
+          if (b.textContent.indexOf('다음') === 0) nx = b;
+        });
+        if (nx) nx.click(); else break;
+      }
+      var mi = document.querySelector('.meaninput');
+      if (!mi) { say('학습 중 뜻 입력칸: 없음 (버그)'); return; }
+      say('학습 중 뜻 입력칸: 있음 (placeholder="' + mi.placeholder + '")');
+      mi.value = '학습중에적은뜻';
+      var btns = document.querySelectorAll('.meanrow button');
+      btns[btns.length - 1].click();
+      Store.saveNow();
+      var st2 = JSON.parse(localStorage.getItem('deutsch-trainer'));
+      var hit = Object.keys(st2.edits).filter(function (k) {
+        return st2.edits[k].ko === '학습중에적은뜻';
+      });
+      say('학습 중 저장 결과: ' + (hit.length ? hit[0] + ' 에 저장됨' : '저장 안 됨 (버그)'));
+      say('저장 후 표시: ' + (document.querySelector('.wmean')
+        ? document.querySelector('.wmean').textContent.slice(0, 40) : '(안 바뀜)'));
+    })();
+
+    // 힌트 동작 — 어떤 문제가 나와도 걸리도록 명사 전체에 뜻을 채워 둔다
+    (function () {
+      // ui.js 는 WORDS 를 시작할 때 한 번 읽으므로 객체를 직접 고친다
+      window.NOUNS.forEach(function (n) {
+        n.ko = '뜻:' + n.de;
+        Store.editWord(n.id, { ko: n.ko });
+      });
+      Store.saveNow();
+      say('뜻 주입: 명사 ' + window.NOUNS.length + '개');
+    })();
+
+    // 학습 화면 — 문제 5개를 실제로 풀어 본다
+    nav('study');
+    var solved = 0, kinds = {};
+    for (var i = 0; i < 6; i++) {
+      var prompt = document.querySelector('.q .prompt');
+      if (!prompt) { say('문제 ' + (i + 1) + ': 문제가 안 뜸'); break; }
+      var tag = document.querySelector('.q.meta .tag');
+      kinds[tag ? tag.innerText : '?'] = 1;
+
+      // 첫 문제에서 힌트 버튼을 눌러 본다 (뜻이 요청할 때만 나오는지)
+      if (i === 0) {
+        var hb = document.querySelector('.hintbtn');
+        if (!hb) say('힌트: 버튼 없음 (이 단어엔 뜻·여분 예문이 없음)');
+        else {
+          say('힌트 버튼: ' + hb.textContent);
+          if (document.querySelector('.hintline')) say('힌트: 누르기 전에 이미 노출됨 (버그)');
+          hb.click();
+          var hl = document.querySelector('.hintline');
+          say('힌트 누른 뒤: ' + (hl ? hl.textContent.slice(0, 60) : '(안 나옴)'));
+        }
+      }
+
+      // 입력 형태에 맞춰 답을 넣는다 (일부러 틀린 답 -> 피드백·오답 경로 확인)
+      var choice = document.querySelector('.choices button');
+      var tableIn = document.querySelectorAll('.answer input[data-key]');
+      var textIn = document.querySelector('.answer input[type=text]');
+      if (choice) { choice.click(); }
+      else if (tableIn.length) {
+        tableIn.forEach(function (x) { x.value = 'der'; });
+        document.querySelector('.answer .actions button').click();
+      } else if (textIn) {
+        textIn.value = 'test';
+        document.querySelector('.answer .actions button').click();
+      } else { say('문제 ' + (i + 1) + ': 입력칸 없음'); break; }
+
+      var fb = document.querySelector('.fb');
+      if (!fb) { say('문제 ' + (i + 1) + ': 채점 결과 없음'); break; }
+      solved++;
+      // 채점 뒤 단어 정보(뜻·예문)가 붙는지
+      var wi = document.querySelector('.winfo');
+      if (!wi) say('문제 ' + (i + 1) + ': 단어 정보 패널 없음');
+      else if (i === 0) say('단어 정보(힌트 썼음): ' + wi.innerText.replace(/\s+/g, ' ').trim().slice(0, 90));
+      else if (i === 1) {
+        // 힌트를 안 쓴 문제 — 뜻이 자동 노출되면 안 된다
+        var t = wi.innerText.replace(/\s+/g, ' ').trim();
+        say('단어 정보(힌트 안씀): ' + t.slice(0, 90));
+        if (/뜻:/.test(t) && t.indexOf('뜻 보기') < 0) say('  ! 뜻이 자동 노출됨 (버그)');
+      }
+      // '다음' 버튼 — 옆에 '발음 듣기' 도 있으므로 글자로 찾는다
+      var next = null;
+      document.querySelectorAll('.card > .actions button').forEach(function (b) {
+        if (b.textContent.indexOf('다음') === 0) next = b;
+      });
+      if (!next) { say('문제 ' + (i + 1) + ': 다음 버튼 없음'); break; }
+      next.click();
+    }
+    say('푼 문제: ' + solved + ' / 유형: ' + Object.keys(kinds).join(', '));
+
+    // 기록이 실제로 localStorage 에 남는지 (새로고침해도 진도가 유지되는가)
+    // save() 는 연타 방지로 200ms 디바운스라 확정 저장을 부른다.
+    Store.saveNow();
+    var raw = localStorage.getItem('deutsch-trainer');
+    var st = raw ? JSON.parse(raw) : null;
+    say('저장된 카드 수: ' + (st ? Object.keys(st.cards).length : 0));
+    say('오늘 푼 문제: ' + (st && st.log.length ? st.log[st.log.length - 1].n : 0));
+    say('연속 학습일: ' + (st ? st.streak : '-'));
+    // 저장본만으로 진도를 되살릴 수 있는지 확인 (새로고침 재현)
+    if (st) {
+      var k = Object.keys(st.cards)[0];
+      say('카드 예: ' + k + ' -> box ' + st.cards[k].box +
+          ', 오답기록 ' + (st.cards[k].lastWrong ? '있음' : '없음'));
+    }
+
+    // 어순 — 성분 카드로 만들고, 맞는 배열이 전부 정답으로 인정되는가
+    (function () {
+      Store.setSetting('drills', ['wordOrder']);
+      nav('study');
+      var cards = document.querySelectorAll('.asmpool .tok.chunk');
+      if (!cards.length) { say('어순(성분): 카드 없음 (버그)'); Store.setSetting('drills', null); return; }
+      say('어순(성분): 카드 ' + cards.length + '개');
+      var labels = [];
+      cards.forEach(function (b) {
+        labels.push(b.querySelector('.ctext').textContent + '(' +
+                    b.querySelector('.crole').textContent + ')');
+      });
+      say('  성분: ' + labels.join(' / '));
+
+      // 정답 배열을 알아내서 두 가지 서로 다른 정답을 시험한다
+      var q = null;
+      // 세션 안을 볼 수 없으니 화면에 있는 카드로 직접 조립해 본다:
+      // 주어를 앞자리로 한 배열과, 다른 성분을 앞자리로 한 배열
+      function pickAll(order) {
+        // 처음부터 다시
+        var reset = null;
+        document.querySelectorAll('.answer .actions button').forEach(function (b) {
+          if (b.textContent.indexOf('처음부터') === 0) reset = b;
+        });
+        if (reset) reset.click();
+        order.forEach(function (txt) {
+          document.querySelectorAll('.asmpool .tok.chunk').forEach(function (b) {
+            if (b.querySelector('.ctext').textContent === txt) b.click();
+          });
+        });
+      }
+      say('  (성분 카드 클릭·되돌리기 동작 확인)');
+      cards[0].click();
+      say('  한 개 누른 뒤 조립 줄: ' + document.querySelectorAll('.asmline .tok.picked').length);
+      document.querySelectorAll('.asmline .tok.picked')[0].click();
+      say('  되돌린 뒤: ' + document.querySelectorAll('.asmline .tok.picked').length);
+
+      // 전부 눌러 제출 (순서가 맞든 틀리든 채점과 문장괄호가 뜨는지 본다)
+      document.querySelectorAll('.asmpool .tok.chunk').forEach(function (b) { b.click(); });
+      var sub = null;
+      document.querySelectorAll('.answer .actions button').forEach(function (b) {
+        if (b.textContent.indexOf('제출') === 0) sub = b;
+      });
+      if (sub) sub.click();
+      var fb = document.querySelector('.fb');
+      say('  제출 결과: ' + (fb ? fb.querySelector('.head').textContent : '(채점 안 됨)'));
+      var kl = document.querySelector('.klammer');
+      say('  문장괄호 그림: ' + (kl ? kl.innerText.replace(/\s+/g, ' ').trim().slice(0, 80) : '없음 (버그)'));
+      Store.setSetting('drills', null);
+    })();
+
+    // 정동사 자리 드릴 — 슬롯을 눌러 답하는가
+    (function () {
+      Store.setSetting('drills', ['verbSlot']);
+      nav('study');
+      var slots = document.querySelectorAll('.slot');
+      if (!slots.length) { say('정동사 자리: 슬롯 없음 (버그)'); Store.setSetting('drills', null); return; }
+      say('정동사 자리: 슬롯 ' + slots.length + '개');
+      say('  문제: ' + document.querySelector('.q .prompt').textContent);
+      say('  ' + document.querySelector('.q .sub').textContent);
+      slots[1].click();
+      var fb2 = document.querySelector('.fb');
+      say('  2번째 자리 선택 → ' + (fb2 ? fb2.querySelector('.head').textContent : '(채점 안 됨)'));
+      Store.setSetting('drills', null);
+    })();
+
+    // 옛 낱말 섞기 드릴 — 낱말 카드를 눌러 문장을 만들 수 있는가
+    (function () {
+      Store.setSetting('drills', ['wordOrder']);
+      nav('study');
+      var toks = document.querySelectorAll('.asmpool .tok');
+      if (!toks.length) { say('어순 조립: 낱말 카드 없음 (버그)'); Store.setSetting('drills', null); return; }
+      say('어순 조립: 낱말 ' + toks.length + '개');
+      var want = null;
+      // 정답 순서대로 누르기 위해 현재 문제의 정답을 읽는다
+      var cards = document.querySelectorAll('.asmpool .tok');
+      var pool = [];
+      cards.forEach(function (b) { pool.push(b.textContent); });
+      say('  카드: ' + pool.slice(0, 6).join(' / '));
+
+      // 아무거나 세 개 눌러 조립 줄에 들어가는지 본다
+      cards[0].click();
+      var line = document.querySelectorAll('.asmline .tok.picked');
+      say('  한 개 누른 뒤 조립 줄: ' + line.length + '개');
+      if (line.length) {
+        line[0].click();
+        say('  되돌리기 뒤 조립 줄: ' + document.querySelectorAll('.asmline .tok.picked').length + '개');
+      }
+      // 제출
+      var sub = null;
+      document.querySelectorAll('.answer .actions button').forEach(function (b) {
+        if (b.textContent.indexOf('제출') === 0) sub = b;
+      });
+      if (!sub) { say('  제출 버튼 없음 (버그)'); }
+      else {
+        cards = document.querySelectorAll('.asmpool .tok');
+        cards.forEach(function (b) { b.click(); });
+        sub = null;
+        document.querySelectorAll('.answer .actions button').forEach(function (b) {
+          if (b.textContent.indexOf('제출') === 0) sub = b;
+        });
+        if (sub) sub.click();
+        var fb = document.querySelector('.fb');
+        say('  제출 결과: ' + (fb ? fb.querySelector('.head').textContent : '(채점 안 됨)'));
+      }
+      Store.setSetting('drills', null);
+    })();
+
+    // 진도 막대가 실제로 0에서 움직이는가 (예전엔 box>=4 라 첫날엔 영원히 0)
+    nav('home');
+    (function () {
+      var rows = document.querySelectorAll('.barrow.prog');
+      if (!rows.length) { say('진도 막대: 행이 없음 (버그)'); return; }
+      var moved = 0, first = null;
+      rows.forEach(function (r) {
+        var segs = r.querySelectorAll('.bar.stacked > i');
+        var w = 0;
+        segs.forEach(function (i) { w += parseFloat(i.style.width) || 0; });
+        if (w > 0) moved++;
+        if (!first) first = r.innerText.replace(/\s+/g, ' ').trim();
+      });
+      say('진도 막대: ' + rows.length + '행 중 ' + moved + '행이 0에서 움직임');
+      say('  첫 행: ' + first);
+      if (!moved) say('  ! 문제를 풀었는데도 전부 0 (버그)');
+    })();
+
+    // 오답노트에 들어갔는지
+    nav('wrong');
+    say('오답노트: ' + txt().slice(0, 60));
+
+    // 삭제 · 되돌리기 — 실제로 버튼을 눌러 본다
+    (function () {
+      nav('meanings');
+      var before = document.querySelector('.mhead');
+      var word = before ? before.innerText.trim() : '?';
+      var del = null;
+      document.querySelectorAll('.mcard .actions button, .actions button').forEach(function (b) {
+        if (!del && b.textContent === '삭제') del = b;
+      });
+      if (!del) { say('삭제: 뜻채우기에 삭제 버튼 없음 (버그)'); return; }
+      del.click();
+
+      var after = document.querySelector('.mhead');
+      say('삭제: "' + word + '" 삭제 → 다음 단어 ' +
+          (after && after.innerText.trim() !== word ? '넘어감' : '안 넘어감 (버그)'));
+
+      var undo = document.querySelector('.undobar');
+      say('  되돌리기 줄: ' + (undo ? undo.innerText.replace(/\s+/g, ' ') : '없음 (버그)'));
+
+      Store.saveNow();
+      var st = JSON.parse(localStorage.getItem('deutsch-trainer'));
+      say('  저장 확인: 지운 항목 ' + Object.keys(st.deleted || {}).length + '개');
+
+      var ub = undo && undo.querySelector('button');
+      if (ub) {
+        ub.click();
+        Store.saveNow();
+        var st2 = JSON.parse(localStorage.getItem('deutsch-trainer'));
+        say('  되돌린 뒤: 지운 항목 ' + Object.keys(st2.deleted || {}).length + '개');
+      }
+    })();
+
+    // 단어장 — 깨진 항목 필터와 삭제
+    (function () {
+      nav('words');
+      var boxes = document.querySelectorAll('.filters input[type=checkbox]');
+      var brokenBox = null, trashBox = null;
+      boxes.forEach(function (b) {
+        var t = b.parentNode.textContent;
+        if (t.indexOf('깨진 항목만') >= 0) brokenBox = b;
+        if (t.indexOf('지운 것 보기') >= 0) trashBox = b;
+      });
+      if (!brokenBox) { say('단어장: 깨진 항목 필터 없음 (버그)'); return; }
+      brokenBox.click();
+      var rowsN = document.querySelectorAll('table.list tr.clickable').length;
+      say('단어장 깨진 항목: 이 페이지에 ' + rowsN + '행');
+      var bulk = null;
+      document.querySelectorAll('.actions button').forEach(function (b) {
+        if (!bulk && b.textContent.indexOf('전부 삭제') >= 0) bulk = b;
+      });
+      say('  일괄 삭제 버튼: ' + (bulk ? bulk.textContent : '없음 (버그)'));
+
+      // 한 항목만 편집 패널로 지워 본다
+      var row = document.querySelector('table.list tr.clickable');
+      if (row) {
+        row.click();
+        var delBtn = null;
+        document.querySelectorAll('.editrow button').forEach(function (b) {
+          if (!delBtn && b.textContent === '이 항목 삭제') delBtn = b;
+        });
+        say('  편집 패널 삭제 버튼: ' + (delBtn ? '있음' : '없음 (버그)'));
+        if (delBtn) {
+          delBtn.click();
+          Store.saveNow();
+          var st3 = JSON.parse(localStorage.getItem('deutsch-trainer'));
+          say('  삭제 후 지운 항목 ' + Object.keys(st3.deleted || {}).length + '개');
+          var tb = null;
+          document.querySelectorAll('.filters input[type=checkbox]').forEach(function (b) {
+            if (b.parentNode.textContent.indexOf('지운 것 보기') >= 0) tb = b;
+          });
+          if (tb) {
+            tb.click();
+            var rows = document.querySelectorAll('table.list tr').length - 1;
+            say('  "지운 것 보기": ' + rows + '행');
+            var back = null;
+            document.querySelectorAll('table.list tr.clickable')[0].click();
+            document.querySelectorAll('.editrow button').forEach(function (b) {
+              if (!back && b.textContent === '되돌리기') back = b;
+            });
+            say('  되돌리기 버튼: ' + (back ? '있음' : '없음 (버그)'));
+            if (back) back.click();
+            Store.saveNow();
+            var st4 = JSON.parse(localStorage.getItem('deutsch-trainer'));
+            say('  되돌린 뒤 지운 항목 ' + Object.keys(st4.deleted || {}).length + '개');
+          }
+        }
+      }
+      // 필터 원상 복구
+      document.querySelectorAll('.filters input[type=checkbox]').forEach(function (b) {
+        if (b.checked && b.parentNode.textContent.indexOf('뜻 없는') < 0) b.click();
+      });
+    })();
+
+    // 접두사 화면 — 카드 클릭 → 상세 → 연습까지 실제로 눌러 본다
+    (function () {
+      function toGrid() {
+        nav('prefixes');
+        // 상세를 보고 있으면 목록으로 되돌린다 (화면 상태가 남아 있다)
+        var back = null;
+        document.querySelectorAll('.actions button').forEach(function (b) {
+          if (!back && b.textContent.indexOf('← 접두사 목록') === 0) back = b;
+        });
+        if (back) back.click();
+      }
+      function openCard(label) {
+        toGrid();
+        var target = null;
+        document.querySelectorAll('.pcard').forEach(function (c) {
+          var b = c.querySelector('b');
+          if (!target && b && b.textContent === label) target = c;
+        });
+        if (target) target.click();
+        return !!target;
+      }
+
+      toGrid();
+      say('접두사: ' + txt().slice(0, 60));
+      var cards = document.querySelectorAll('.pcard');
+      say('  접두사 카드 ' + cards.length + '개');
+      if (!cards.length) { say('  카드 없음 (버그)'); return; }
+
+      // auf- 는 시드가 여러 개 있어 뜻 공개 동작까지 볼 수 있다
+      if (!openCard('auf-')) { say('  auf- 카드 없음 (버그)'); return; }
+      var head = document.querySelector('.phead.big b');
+      say('  상세 열림: ' + (head ? head.textContent : '(안 열림 — 버그)'));
+
+      var tbl = document.querySelector('table.ref');
+      say('  문법 3형 표: ' + (tbl ? tbl.innerText.replace(/\s+/g, ' ').slice(0, 70) : '없음 (버그)'));
+
+      var reveal = null;
+      document.querySelectorAll('.linkish').forEach(function (b) {
+        if (!reveal && b.textContent === '뜻 보기') reveal = b;
+      });
+      say('  뜻 가려짐: ' + (reveal ? '예 (눌러야 나옴)' : '아니오 (버그)'));
+      if (reveal) {
+        reveal.click();
+        say('  뜻 열기: ' + (document.querySelector('.lit') ? '뜻 + 직역 표시됨' : '뜻만 표시됨'));
+      }
+
+      openCard('auf-');
+      var run = null;
+      document.querySelectorAll('.actions button').forEach(function (b) {
+        if (!run && b.textContent.indexOf('이 접두사만 연습') === 0) run = b;
+      });
+      if (!run) { say('  연습 버튼 없음 (버그)'); return; }
+      run.click();
+      var q = document.querySelector('.q.prompt') || document.querySelector('.prompt');
+      say('  연습 시작: ' + (q ? q.innerText.trim().slice(0, 40) : '문제 안 뜸 (버그)'));
+
+      var ch = document.querySelector('.choices button');
+      var tx = document.querySelector('.answer input[type=text]');
+      if (ch) ch.click();
+      else if (tx) {
+        var sb = null;
+        document.querySelectorAll('.answer .actions button').forEach(function (b) {
+          if (b.textContent.indexOf('제출') === 0) sb = b;
+        });
+        tx.value = 'x'; if (sb) sb.click();
+      }
+      var fb = document.querySelector('.fb');
+      say('  채점: ' + (fb ? fb.innerText.replace(/\s+/g, ' ').slice(0, 80) : '결과 없음 (버그)'));
+
+      // 기본 동사 패밀리
+      toGrid();
+      var famTab = null;
+      document.querySelectorAll('.subtab').forEach(function (b) {
+        if (b.textContent.indexOf('기본 동사') >= 0) famTab = b;
+      });
+      if (!famTab) { say('  패밀리 탭 없음 (버그)'); return; }
+      famTab.click();
+      var fc = document.querySelectorAll('.pcard');
+      say('  패밀리 카드 ' + fc.length + '개');
+      if (fc.length) {
+        fc[0].click();
+        var rows = document.querySelectorAll('table.list tr').length - 1;
+        var h3 = document.querySelector('h3');
+        say('  패밀리 "' + (h3 ? h3.textContent : '?') + '" ' + rows + '행');
+      }
+    })();
+
+    // 뜻 채우기 — 접두사 동사만 필터와 분해 힌트
+    (function () {
+      nav('meanings');
+      var boxes = document.querySelectorAll('.filters input[type=checkbox]');
+      var pfxBox = boxes[boxes.length - 1];
+      if (!pfxBox) { say('뜻채우기: 접두사 필터 없음 (버그)'); return; }
+      pfxBox.click();
+      var hint = document.querySelector('.dhint');
+      var w = document.querySelector('.mhead');
+      say('접두사 뜻채우기: ' + (w ? w.innerText.trim() : '?') +
+          ' · 분해 힌트 ' + (hint ? hint.innerText.replace(/\s+/g, ' ') : '없음'));
+      pfxBox.click();   // 원상 복구
+    })();
+
+    // 통계 함수에 넘길 단어 목록 (앱이 쓰는 것과 같은 구성)
+    window.__W = Store.applyEdits([].concat(
+      window.NOUNS || [], window.VERBS || [], window.ADJECTIVES || [],
+      window.FUNCTIONWORDS || [],
+      window.GrammarDrills ? window.GrammarDrills.makeItems() : [],
+      window.OrderDrills ? window.OrderDrills.makeItems() : [],
+      window.WordOrderDrills ? window.WordOrderDrills.makeItems() : []));
+
+    // 통계
+    nav('stats');
+    say('통계: ' + txt().slice(0, 80));
+
+    // 성별 오답률이 100% 를 넘으면 집계가 어딘가 어긋난 것이다
+    (function () {
+      var rows = [];
+      Stats.seenCards().forEach(function (x) {
+        if (Stats.GENDER_DRILLS.indexOf(x.drill) < 0) return;
+        rows.push(x.id + '|' + x.drill + ' seen=' + JSON.stringify(x.card.seen) +
+                  ' wrong=' + JSON.stringify(x.card.wrong));
+      });
+      say('  성 관련 카드 ' + rows.length + '장');
+      rows.slice(0, 12).forEach(function (r) { say('    ' + r); });
+      var g = Stats.byGender(window.__W || []);
+      say('  성별 집계: ' + g.map(function (x) {
+        return x.g + ' ' + x.wrong + '/' + x.seen;
+      }).join('  '));
+      var bad = g.filter(function (x) { return x.rate > 1; });
+      say('  오답률 100% 초과: ' + (bad.length ? '있음 (버그)' : '없음'));
+    })();
+    // 마지막에 접두사 화면을 띄워 둔다 — 스크린샷으로 눈으로 확인하기 위해
+    nav('words');
+    document.querySelectorAll('.filters input[type=checkbox]').forEach(function (b) {
+      if (b.parentNode.textContent.indexOf('깨진 항목만') >= 0 && !b.checked) b.click();
+    });
+  } catch (e) {
+    errs.push('THROW: ' + e.message + '\n' + e.stack);
+  }
+  document.getElementById('report').textContent =
+    '=== SMOKE ===\n' + log.join('\n') +
+    '\n=== 에러 ' + errs.length + ' ===\n' + errs.join('\n');
+}, 500);
+</script>
+</body>
+</html>

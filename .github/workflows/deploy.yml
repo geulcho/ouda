@@ -1,0 +1,88 @@
+# 푸시하면 검증 → 빌드 → GitHub Pages 배포까지 자동으로 한다.
+#
+# Supabase 키는 저장소에 두지 않고 Actions Secrets 에서 받아
+# 빌드 직전에 data/config.js 를 만든다. (anon 키는 어차피 브라우저로 나가는
+# 공개 값이지만, 커밋해 두면 교체가 번거로워진다. 실제 접근 차단은 RLS 가 한다.)
+#
+#   Settings > Secrets and variables > Actions 에 넣을 것
+#     SUPABASE_URL       https://xxxx.supabase.co
+#     SUPABASE_ANON_KEY  eyJhbGciOi...
+#
+# 키를 안 넣으면 config.js 없이 빌드되고, 앱은 로그인·동기화 없이
+# 로컬 전용으로 그대로 동작한다.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 배포가 겹치면 마지막 것만 살린다
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # 엔진·드릴·채점·SRS·동기화 병합을 전부 돌린다.
+      # 여기서 깨지면 배포하지 않는다.
+      - name: 검증
+        run: |
+          node tools/test_engines.js
+          node tools/test_app.js
+          node tools/test_sync.js
+          node tools/test_wordorder.js
+          node tools/test_meaning.js
+          node tools/test_prefix.js
+          node tools/test_delete.js
+
+      - name: 설정 파일 생성
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
+            printf 'window.SYNC_CONFIG = { url: %s, key: %s };\n' \
+              "$(printf '%s' "$SUPABASE_URL" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" \
+              "$(printf '%s' "$SUPABASE_ANON_KEY" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" \
+              > data/config.js
+            echo "config.js 생성됨"
+          else
+            echo "Secrets 가 없어 로컬 전용으로 빌드합니다"
+          fi
+
+      - name: 배포본 빌드
+        run: python tools/build_dist.py
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

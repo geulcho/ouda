@@ -1,0 +1,15 @@
+{
+  "name": "Öuda — 독일어 트레이너",
+  "short_name": "Öuda",
+  "description": "Goethe A1~B1 어휘와 독일어 어순·문법을 반복 학습",
+  "lang": "ko",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#11131a",
+  "theme_color": "#11131a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

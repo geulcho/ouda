@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Öuda">
+  <!--
+    Ö 한 글자에 세 성을 담는다.
+    링과 점 두 개라는 구조가 마침 세 조각이라 그대로 맞아떨어진다.
+      왼쪽 점  파랑  der      오른쪽 점  빨강  die      링  초록  das
+    16px 로 줄여도 "점 둘 + 링"이라는 형태와 세 색이 살아 있다.
+  -->
+  <rect width="512" height="512" rx="112" fill="#11131a"/>
+  <circle cx="256" cy="316" r="118" fill="none" stroke="#4fd18b" stroke-width="46"/>
+  <circle cx="196" cy="126" r="34" fill="#5b9dff"/>
+  <circle cx="316" cy="126" r="34" fill="#ff7b8a"/>
+</svg>

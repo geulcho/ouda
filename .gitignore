@@ -1,0 +1,21 @@
+# 저작권 자료 — 저장소에 넣지 않는다.
+# 추출 파이프라인(tools/extract.py)을 돌리려면 각자 내려받아 이 폴더에 두세요.
+#   Goethe A1/A2/B1 Wortliste : goethe.de 에서 무료 배포
+#   Aspekte neu B2 Kapitelwortschatz : 교재 부속 자료
+*.pdf
+
+# 동기화·인증 설정 (Supabase 키). data/config.example.js 를 복사해 만든다.
+data/config.js
+
+# 빌드 산출물 — Actions 가 만든다
+dist/
+tools/out/
+
+# 파이썬
+__pycache__/
+*.py[cod]
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -154,6 +154,73 @@
   /** 뜻이 채워진 표제어 수 — 진척도 표시에 쓴다 */
   function meaningCount() { return views().meanings; }
 
+  /*
+   * 사전에 들어 있는 항목 수.
+   *
+   * baked + delta 로 더하면 안 된다 — 같은 행이 양쪽에 있으면 두 번 세어진다.
+   * (구운 것 623 + 델타 887 = 1510 처럼 실제보다 크게 나온다)
+   */
+  function size() { return Object.keys(load()).length; }
+
+  /** 얕은 값 비교. patch 에는 문자열·불린만 들어간다. */
+  function sameObj(a, b) {
+    var ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (var i = 0; i < ka.length; i++) {
+      if (a[ka[i]] !== b[ka[i]]) return false;
+    }
+    return true;
+  }
+
+  /*
+   * 사전에 이미 똑같이 들어 있는 로컬 수정을 지운다.
+   *
+   * 뜻은 발행 뒤 두 군데에 남는다 — 사전(dictionary)과 개인기록(progress).
+   * 발행할 때 로컬 사본은 지우지만 progress 의 서버 행에는 그대로 있어서,
+   * 다음 동기화가 그것을 다시 끌어온다. '안 올린 수정 168개' 가 되살아나는 이유다.
+   * 다른 기기에 남아 있던 사본도 같은 길로 돌아온다.
+   *
+   * 값이 사전과 완전히 같을 때만 지운다. 다르면 아직 안 올린 진짜 수정이므로 남긴다.
+   */
+  function prune() {
+    var S = global.Store;
+    if (!S) return 0;
+    var s = S.load();
+    var v = views();
+    var n = 0;
+
+    Object.keys(s.edits || {}).forEach(function (id) {
+      var theirs = v.patches[id];
+      if (!theirs) return;
+      if (sameObj(clean(s.edits[id]), theirs)) { delete s.edits[id]; n++; }
+    });
+
+    Object.keys(s.aliases || {}).forEach(function (id) {
+      var theirs = v.aliases[id];
+      if (!theirs) return;
+      var covered = true;
+      (s.aliases[id] || []).forEach(function (x) {
+        if (theirs.indexOf(x) < 0) covered = false;
+      });
+      if (covered) { delete s.aliases[id]; n++; }
+    });
+
+    Object.keys(s.deleted || {}).forEach(function (id) {
+      if (v.deleted[id]) { delete s.deleted[id]; n++; }
+    });
+
+    if (v.added.length && (s.added || []).length) {
+      var have = {};
+      v.added.forEach(function (w) { if (w && w.id) have[w.id] = 1; });
+      var before = s.added.length;
+      s.added = s.added.filter(function (w) { return !(w && have[w.id]); });
+      n += before - s.added.length;
+    }
+
+    if (n) S.saveNow();
+    return n;
+  }
+
   // ---------------------------------------------------------------- 델타 받기
 
   /**
@@ -185,6 +252,7 @@
     }).then(function (list) {
       list = list || [];
       if (!list.length) {
+        prune();                 // 받을 게 없어도 겹치는 로컬 사본은 정리한다
         state.status = 'idle';
         state.message = '최신입니다';
         emit();
@@ -204,6 +272,8 @@
       invalidate();
       state.delta = Object.keys(cached.rows).length;
       state.since = cached.since;
+      // 사전에 들어온 것과 똑같은 로컬 사본은 이제 필요 없다
+      prune();
       state.status = 'idle';
       state.message = list.length + '개 갱신됨';
       emit();
@@ -409,6 +479,7 @@
       // 사전에 들어간 것만 로컬에서 지운다
       dropPublished(s, savedIds);
       S.saveNow();
+      pushCleared();
       state.status = 'idle';
       state.message = done + '개 발행됨';
       emit();
@@ -422,6 +493,19 @@
       emit();
       throw e;
     });
+  }
+
+  /*
+   * 비워진 상태를 개인기록 서버 행에도 바로 올린다.
+   *
+   * 안 올리면 progress 에 옛 뜻이 남아 있다가 다음 동기화 때 되돌아온다.
+   * 발행했는데 '안 올린 수정' 이 그대로인 것처럼 보이는 것이 이 때문이다.
+   */
+  function pushCleared() {
+    var Sy = global.Sync;
+    if (!Sy || !Sy.schedulePush) return;
+    Sy.schedulePush();
+    if (Sy.flush) Sy.flush();
   }
 
   /** 사전에 들어간 항목만 로컬 사본에서 뺀다 */
@@ -471,6 +555,8 @@
     configured: configured,
     canWrite: canWrite,
     pull: pull,
+    prune: prune,
+    size: size,
     publishLocal: publishLocal,
     pendingCount: pendingCount,
     patches: patches,

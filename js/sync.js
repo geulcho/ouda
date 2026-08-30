@@ -213,6 +213,12 @@
       var local = S.load();
       var merged = merge(local, remote);
       S.replaceAll(merged);
+      /*
+       * 병합이 끝나면 사전에 이미 있는 수정은 걷어낸다.
+       * 서버의 개인기록에는 발행 전에 올려 둔 뜻이 남아 있어서, 그냥 두면
+       * 발행이 끝났는데도 '안 올린 수정' 으로 되살아난다.
+       */
+      if (global.Dict && global.Dict.prune) global.Dict.prune();
       state.lastPull = Date.now();
       setStatus('idle', '동기화됨');
       // 병합 결과를 서버에도 올려 둔다 (다른 기기가 내 진도를 받도록)

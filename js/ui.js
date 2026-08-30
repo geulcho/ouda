@@ -2796,7 +2796,8 @@
       if (Dc) {
         var d = Dc.state;
         box.appendChild(el('p', { class: 'muted small', text:
-          '공용 사전 ' + (d.baked + d.delta) + '개' + (d.message ? ' · ' + d.message : '') }));
+          '공용 사전 ' + Dc.size().toLocaleString() + '개' +
+          (d.message ? ' · ' + d.message : '') }));
       }
 
       box.appendChild(el('div', { class: 'actions leftish' }, [

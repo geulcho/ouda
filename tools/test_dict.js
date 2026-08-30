@@ -279,6 +279,68 @@ var publishTests = function () {
   })
 
   .then(function () {
+    /*
+     * 실제로 겪은 버그.
+     *
+     * 발행하면 로컬 사본은 지워지지만 개인기록(progress) 서버 행에는 뜻이 그대로
+     * 남아 있다. '지금 동기화' 가 그것을 다시 끌어와 '안 올린 수정 168개' 가
+     * 되살아났다. 발행 -> 동기화 -> 발행 -> 동기화 가 끝없이 반복된다.
+     */
+    console.log('발행한 뒤 옛 기록이 돌아와도 다시 대기로 잡지 않는다');
+    seed(30);
+    fakeServer();
+    return Dict.publishLocal().then(function () {
+      eq('발행 직후 대기 0', Dict.pendingCount(), 0);
+
+      // 동기화가 서버의 옛 progress 를 끌어와 edits 를 되살린 상황
+      var s = Store.load();
+      for (var i = 0; i < 30; i++) s.edits['w' + i] = { ko: '뜻' + i, _ts: 1 };
+      Store.saveNow();
+      eq('되살아남', Dict.pendingCount(), 30);
+
+      // 병합 뒤 정리가 이것을 걷어내야 한다
+      var n = Dict.prune();
+      eq('걷어낸 개수', n, 30);
+      eq('대기 다시 0', Dict.pendingCount(), 0);
+      eq('사전은 그대로', Object.keys(Dict.patches()).length, 30);
+    });
+  })
+
+  .then(function () {
+    console.log('사전과 다른 값은 진짜 수정이므로 남긴다');
+    var s = Store.load();
+    s.edits['w0'] = { ko: '내가 고친 새 뜻', _ts: 2 };
+    s.edits['w1'] = { ko: '뜻1', _ts: 2 };       // 사전과 같음
+    Store.saveNow();
+    eq('둘 다 대기', Dict.pendingCount(), 2);
+    Dict.prune();
+    eq('같은 것만 걷어냄', Dict.pendingCount(), 1);
+    eq('고친 것은 남음', Store.load().edits['w0'].ko, '내가 고친 새 뜻');
+  })
+
+  .then(function () {
+    console.log('사전 개수를 두 번 세지 않는다');
+    resetStore();
+    sandbox.window.DICT = {
+      builtAt: '2026-01-01T00:00:00Z',
+      rows: { 'a': { p: { ko: 'ㄱ' }, a: [], d: false, e: null, t: 'x' },
+              'b': { p: { ko: 'ㄴ' }, a: [], d: false, e: null, t: 'x' } }
+    };
+    storage['ouda-dict-delta'] = JSON.stringify({
+      since: '2026-03-01T00:00:00Z',
+      rows: { 'b': { p: { ko: 'ㄴ2' }, a: [], d: false, e: null, t: 'y' },
+              'c': { p: { ko: 'ㄷ' }, a: [], d: false, e: null, t: 'y' } }
+    });
+    Dict._reset();
+    // size() 가 load() 를 부르면서 baked/delta 가 채워진다 (지연 적재라 순서가 있다)
+    eq('실제 항목은 3개 (b 는 하나)', Dict.size(), 3);
+    eq('구운 것 2', Dict.state.baked, 2);
+    eq('델타 2', Dict.state.delta, 2);
+    eq('더하면 4 라서 두 번 세게 된다', Dict.state.baked + Dict.state.delta, 4);
+    eq('델타가 이김', Dict.patches()['b'].ko, 'ㄴ2');
+  })
+
+  .then(function () {
     console.log('지운 항목·답지도 함께 올라간다');
     resetStore();
     setDict({});

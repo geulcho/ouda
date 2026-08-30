@@ -182,12 +182,22 @@
 
   /*
    * 뜻 테스트에서 '이것도 정답' 으로 인정한 답.
-   * 띄어쓰기 정규화로도 안 걸리는 표현을 사용자가 직접 답지에 넣는 통로다.
+   * 띄어쓰기 정규화로도 안 걸리는 표현을 직접 답지에 넣는 통로다.
    * 한 번 넣으면 다음부터 자동으로 정답 처리된다.
+   *
+   * 답지는 합집합이다. 운영자가 사전에 넣어 둔 것과, 이 사람이 자기 채점에서
+   * 인정한 것이 둘 다 살아남아야 한다. (인정은 뜻을 쓰는 게 아니라 자기 채점을
+   * 넓히는 것이라 일반 사용자에게도 열어 둔다 — 자기 기록에만 남는다)
    */
   function getAliases(id) {
     var s = load();
-    return (s.aliases && s.aliases[id]) || [];
+    var mine = (s.aliases && s.aliases[id]) || [];
+    var shared = global.Dict ? (global.Dict.aliases()[id] || []) : [];
+    if (!shared.length) return mine;
+    if (!mine.length) return shared.slice();
+    var out = shared.slice();
+    mine.forEach(function (x) { if (out.indexOf(x) < 0) out.push(x); });
+    return out;
   }
 
   function addAlias(id, text) {
@@ -234,28 +244,61 @@
     return true;
   }
 
+  /*
+   * 지운 것은 두 군데에 있다.
+   *   공용 사전  운영자가 지운 것 — 모든 사용자에게 적용된다
+   *   로컬       운영자가 방금 지워 아직 안 올린 것 (일반 사용자는 비어 있다)
+   */
+  function dictDeleted() {
+    return global.Dict ? global.Dict.deleted() : null;
+  }
+
   function isDeleted(id) {
     var s = load();
-    return !!(s.deleted && s.deleted[id]);
+    if (s.deleted && s.deleted[id]) return true;
+    var d = dictDeleted();
+    return !!(d && d[id]);
   }
 
   function deletedCount() {
     var s = load();
-    return s.deleted ? Object.keys(s.deleted).length : 0;
+    var seen = {}, n = 0, k;
+    for (k in (s.deleted || {})) { if (!seen[k]) { seen[k] = 1; n++; } }
+    var d = dictDeleted() || {};
+    for (k in d) { if (!seen[k]) { seen[k] = 1; n++; } }
+    return n;
   }
 
   /** 지운 것을 걸러 낸다 */
   function dropDeleted(list) {
     var s = load();
-    if (!s.deleted || !Object.keys(s.deleted).length) return list;
-    return list.filter(function (e) { return !s.deleted[e.id]; });
+    var local = s.deleted || {};
+    var d = dictDeleted() || {};
+    if (!Object.keys(local).length && !Object.keys(d).length) return list;
+    return list.filter(function (e) { return !local[e.id] && !d[e.id]; });
   }
 
+  /*
+   * 단어에 덮어쓸 것을 순서대로 얹는다.
+   *
+   *   정적 데이터 (data/nouns.js …)
+   *     → 공용 사전 (운영자가 쓴 뜻. 모든 사용자가 같은 것을 본다)
+   *       → 로컬 수정 (운영자 자신이 방금 고쳐 아직 안 올린 것)
+   *
+   * 일반 사용자는 edits 가 비어 있으므로 사실상 공용 사전만 얹힌다.
+   */
   function applyEdits(list) {
     var s = load();
-    if (!Object.keys(s.edits).length) return list;
+    var dict = global.Dict ? global.Dict.patches() : null;
+    var hasDict = !!(dict && Object.keys(dict).length);
+    var hasEdits = !!Object.keys(s.edits).length;
+    if (!hasDict && !hasEdits) return list;
+
     return list.map(function (e) {
-      return s.edits[e.id] ? Object.assign({}, e, s.edits[e.id]) : e;
+      var d = hasDict ? dict[e.id] : null;
+      var l = hasEdits ? s.edits[e.id] : null;
+      if (!d && !l) return e;
+      return Object.assign({}, e, d || {}, l || {});
     });
   }
 

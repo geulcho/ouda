@@ -1,23 +1,27 @@
 /*
- * sync.js — 기기 간 진도 동기화
+ * sync.js — 개인 학습기록 동기화
  *
  * 핵심은 병합이다. 통째로 덮어쓰면(last-write-wins) 폰에서 공부한 뒤
  * PC가 오래된 상태를 밀어 넣는 순간 진도가 사라진다.
  * 그래서 카드 하나하나를 마지막 복습 시각으로 비교해 최신본을 고른다.
  *
- * 설정이 없으면(data/config.js 없음, 또는 동기화 코드 미입력) 아무것도 하지 않고
- * 지금까지처럼 로컬 전용으로 동작한다. file:// 로 여는 경우가 그렇다.
+ * 예전에는 24자 코드를 아는 기기끼리 한 행을 같이 썼는데, 계정이 생기면서
+ * 로그인한 사용자별로 progress 한 행을 쓴다. 남의 기록은 RLS 가 막는다.
+ * (코드 방식은 anon 키만 있으면 아무 행이나 읽혔다)
+ *
+ * 여기서 다루는 것은 개인 기록뿐이다 — 공용 뜻 사전은 js/dict.js 가 따로 맡는다.
+ *
+ * 로그인하지 않았거나 설정이 없으면 아무것도 하지 않고 로컬 전용으로 동작한다.
+ * file:// 로 더블클릭해 여는 경우가 그렇다.
  */
 (function (global) {
   'use strict';
 
   var S = global.Store;
-  var KEY_CODE = 'deutsch-sync-code';
   var PUSH_DELAY = 5000;
 
   var state = {
     enabled: false,
-    code: null,
     lastPull: 0,
     lastPush: 0,
     status: 'off',      // off | idle | syncing | error | offline
@@ -43,26 +47,14 @@
     return global.SYNC_CONFIG || null;   // data/config.js 가 정의한다
   }
 
-  function getCode() {
-    try { return global.localStorage.getItem(KEY_CODE); } catch (e) { return null; }
-  }
-
-  function setCode(c) {
-    try {
-      if (c) global.localStorage.setItem(KEY_CODE, c);
-      else global.localStorage.removeItem(KEY_CODE);
-    } catch (e) {}
-    state.code = c || null;
-    state.enabled = !!(config() && state.code);
-    setStatus(state.enabled ? 'idle' : 'off');
-  }
-
-  /** 다른 기기에 입력할 코드. 길고 임의라서 이걸 아는 기기끼리만 같은 진도를 본다. */
-  function newCode() {
-    var s = '';
-    var abc = 'abcdefghijkmnpqrstuvwxyz23456789';
-    for (var i = 0; i < 24; i++) s += abc.charAt(Math.floor(Math.random() * abc.length));
-    return s.replace(/(.{6})(?=.)/g, '$1-');
+  /** 로그인해야 동기화가 켜진다. 어느 행을 쓸지는 계정이 정한다. */
+  function refresh() {
+    var on = !!(config() && global.Auth && global.Auth.loggedIn());
+    if (on !== state.enabled) {
+      state.enabled = on;
+      setStatus(on ? 'idle' : 'off');
+    }
+    return state.enabled;
   }
 
   // ---------------------------------------------------------------- 병합
@@ -175,36 +167,36 @@
 
   function endpoint() {
     var c = config();
-    return c.url.replace(/\/$/, '') + '/rest/v1/sync';
+    return c.url.replace(/\/$/, '') + '/rest/v1/progress';
   }
 
   function headers() {
-    var c = config();
-    return {
-      'apikey': c.key,
-      'Authorization': 'Bearer ' + c.key,
-      'Content-Type': 'application/json',
+    return global.Auth.headers({
       'Prefer': 'resolution=merge-duplicates,return=minimal'
-    };
+    });
   }
 
   function pull() {
-    if (!state.enabled) return Promise.resolve(null);
-    return fetch(endpoint() + '?code=eq.' + encodeURIComponent(state.code) + '&select=data',
-                 { headers: headers() })
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
-      .then(function (rows) { return (rows && rows[0]) ? rows[0].data : null; });
+    if (!refresh()) return Promise.resolve(null);
+    var uid = global.Auth.userId();
+    return headers().then(function (h) {
+      return fetch(endpoint() + '?user_id=eq.' + encodeURIComponent(uid) + '&select=data',
+                   { headers: h });
+    }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function (rows) { return (rows && rows[0]) ? rows[0].data : null; });
   }
 
   function push(payload) {
-    if (!state.enabled) return Promise.resolve();
-    return fetch(endpoint(), {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify({ code: state.code, data: payload, updated_at: new Date().toISOString() })
+    if (!refresh()) return Promise.resolve();
+    var uid = global.Auth.userId();
+    return headers().then(function (h) {
+      return fetch(endpoint(), {
+        method: 'POST',
+        headers: h,
+        body: JSON.stringify({ user_id: uid, data: payload })
+      });
     }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
     });
@@ -214,9 +206,7 @@
 
   /** 앱 시작 시 한 번: 받아서 병합하고 되돌려 준다 */
   function start() {
-    state.code = getCode();
-    state.enabled = !!(config() && state.code);
-    if (!state.enabled) { setStatus('off'); return Promise.resolve(false); }
+    if (!refresh()) { setStatus('off'); return Promise.resolve(false); }
 
     setStatus('syncing', '받는 중…');
     return pull().then(function (remote) {
@@ -238,7 +228,7 @@
 
   /** 변경이 생길 때마다 부른다. 5초 디바운스로 묶어서 올린다. */
   function schedulePush() {
-    if (!state.enabled) return;
+    if (!refresh()) return;
     state.pending = true;
     if (timer) return;
     timer = global.setTimeout(function () {
@@ -248,7 +238,7 @@
   }
 
   function flush() {
-    if (!state.enabled || !state.pending) return Promise.resolve();
+    if (!refresh() || !state.pending) return Promise.resolve();
     state.pending = false;
     setStatus('syncing', '올리는 중…');
     var local = S.load();
@@ -264,7 +254,7 @@
 
   /** 수동 동기화 — 받아서 병합하고 올린다 */
   function syncNow() {
-    if (!state.enabled) return Promise.resolve(false);
+    if (!refresh()) return Promise.resolve(false);
     state.pending = true;
     return start();
   }
@@ -284,9 +274,7 @@
     flush: flush,
     syncNow: syncNow,
     schedulePush: schedulePush,
-    setCode: setCode,
-    getCode: getCode,
-    newCode: newCode,
+    refresh: refresh,
     merge: merge,
     mergeCards: mergeCards,
     mergeLog: mergeLog,

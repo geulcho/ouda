@@ -6,11 +6,13 @@
 
 ## 실행
 
-**PC** — `index.html` 을 더블클릭. 서버도 설치도 필요 없습니다.
+**웹** — <https://geulcho.github.io/ouda/> 를 열면 됩니다. 폰에서는 **홈 화면에 추가**
+하면 전체화면으로 뜨고 비행기 모드에서도 돕니다.
 
-**폰** — 아래 "폰에서 쓰기" 참고. 호스팅해야 제대로 동작합니다.
+**PC 로컬** — `index.html` 을 더블클릭. 서버도 설치도 필요 없습니다.
+이때는 계정 없이 로컬 전용으로 돕니다.
 
-학습 기록은 브라우저 localStorage에 저장됩니다. 동기화를 켜지 않으면
+학습 기록은 브라우저 localStorage에 저장됩니다. 로그인하지 않으면
 기기마다 따로 놀고, 브라우저 데이터를 지우면 사라집니다.
 가끔 **설정 → 백업 → 기록 내려받기** 를 해 두세요.
 
@@ -345,43 +347,100 @@ Goethe 단어장은 누적입니다. A1 단어가 A2·B1 목록에도 다시 실
 
 맨 위 **빈칸 채우기로 연습** 을 켜면 표의 칸이 입력칸으로 바뀌고 채점됩니다.
 
-## 폰에서 쓰기
+## 배포
 
-`file://` 방식은 폰에서 안 됩니다. 배포본을 만들어 호스팅하세요.
+`main` 에 푸시하면 GitHub Actions 가 검증 → 빌드 → Pages 배포까지 알아서 합니다
+(`.github/workflows/deploy.yml`). 손으로 할 일은 없습니다.
+
+```
+푸시 → 테스트 8종 → 공용 사전 굽기 → dist 빌드 → Pages
+```
+
+테스트가 하나라도 깨지면 배포하지 않습니다.
+
+직접 빌드하려면:
 
 ```bash
-python tools/build_dist.py
+python tools/pull_dict.py     # 공용 사전을 data/dict.js 로 굽는다
+python tools/build_dist.py    # dist/ 를 만든다
 ```
 
 ```
 dist/              호스팅에 올릴 폴더 (PWA · 서비스워커 포함)
-dist/single.html   전부 인라인한 단일 파일 — 오프라인 백업본
+dist/single.html   전부 인라인한 단일 파일 — 인터넷 없이 폰에 넣는 백업본
 ```
 
-**Cloudflare Pages** 가 제일 간단합니다 (git 없이 폴더만 올리면 됩니다).
-
-1. dash.cloudflare.com → Workers & Pages → Create → Pages → **Upload assets**
-2. `dist` 폴더를 통째로 끌어다 놓기
-3. 나오는 주소를 폰에서 열고 **홈 화면에 추가**
-
-홈 화면에서 실행하면 전체화면으로 뜨고, 서비스워커가 캐시해서
-**비행기 모드에서도 동작**합니다. 서비스워커는 https 에서만 되므로 호스팅이 필요합니다.
+서비스워커는 https 에서만 등록되므로 오프라인은 호스팅했을 때만 됩니다.
 PC에서 `index.html` 을 더블클릭하는 방식은 그대로 유지됩니다.
 
-## 기기 간 동기화
+`dist/` 와 원본 PDF 는 저장소에 없습니다. PDF 는 저작권 자료라 뺐고
+(`tools/extract.py` 를 돌리려면 각자 내려받아 두어야 합니다), `dist/` 는 빌드 산출물입니다.
 
-켜지 않으면 PC와 폰의 진도가 따로 놉니다.
+## 계정과 공용 사전
 
-`data/config.example.js` 를 `data/config.js` 로 복사하고 Supabase 주소·키를 넣으세요.
-설정 방법은 그 파일 맨 위 주석에 있습니다 (프로젝트 생성 → SQL 한 번 붙여넣기 → 키 복사).
+여러 사람이 각자 진도를 쌓고, **뜻은 운영자 한 사람이 채워 모두가 받습니다.**
 
-그다음 **설정 → 기기 간 동기화 → 새 코드 만들기**, 다른 기기에 같은 코드를 입력합니다.
+### 데이터가 세 층으로 나뉩니다
+
+| 층 | 무엇 | 쓰기 | 읽기 | 어디에 |
+|---|---|---|---|---|
+| 정적 데이터 | 표제어·활용·문법 규칙 | 빌드 | 전원 | `data/*.js` |
+| **공용 뜻 사전** | 뜻·수정·삭제·인정답 | **운영자만** | 전원 | Supabase `dictionary` |
+| 개인 기록 | SRS 카드·학습로그·설정 | 본인 | 본인 | Supabase `progress` |
+
+단어에 값을 얹는 순서는 **정적 데이터 → 공용 사전 → 아직 안 올린 로컬 수정** 입니다
+(`js/store.js` 의 `applyEdits`). 이 순서가 틀어지면 조용히 틀린 뜻을 가르치므로
+`node tools/test_dict.js` 가 층마다 검증합니다.
+
+### 준비
+
+`data/config.example.js` 를 `data/config.js` 로 복사하고 Supabase 주소·키를 넣은 뒤,
+`tools/schema.sql` 을 SQL Editor 에 붙여넣고 실행하세요. 자세한 순서는
+`config.example.js` 맨 위 주석에 있습니다.
+
+가입한 다음 자기 계정을 운영자로 올립니다.
+
+```sql
+update public.profiles set role = 'admin'
+where id = (select id from auth.users where email = '내-이메일@example.com');
+```
+
+### 운영자가 뜻을 채우는 흐름
+
+지금까지와 똑같이 **뜻 채우기 탭·단어장·채점 화면**에서 채웁니다. 채운 것은 일단
+내 기기에만 남고, **설정 → 계정 → `사전에 발행`** 을 누르면 한 번에 올라가
+모든 사용자에게 반영됩니다. 오프라인에서 채워 두었다가 나중에 올려도 됩니다.
+
+발행하면 로컬 사본은 사전으로 옮겨집니다. 남겨 두면 다른 기기에서 고친 값을
+낡은 값으로 덮어 버리기 때문입니다.
+
+### 사용자에게 전달되는 방식
+
+빌드에 구운 사전(`data/dict.js`)을 먼저 읽고, **그 뒤에 바뀐 것만** 델타로 받습니다.
+그래서 첫 화면이 서버를 기다리지 않고, 비행기 모드에서도 뜻이 나오고,
+뜻 하나 고치자고 재배포하지 않아도 됩니다. 받은 델타는 localStorage 에 쌓여
+다음 실행에도 남고, 다음 요청은 갈수록 가벼워집니다.
+
+일반 사용자에게는 뜻 입력칸·단어 추가·삭제 버튼이 보이지 않고,
+`뜻 채우기` 탭은 `뜻 테스트` 로 바뀝니다. 다만 채점에서 **`'…' 도 정답으로 인정`**
+은 그대로 쓸 수 있습니다 — 뜻을 쓰는 게 아니라 자기 채점을 넓히는 것이고,
+그 답은 자기 기록에만 남습니다.
+
+**화면에서 감추는 것은 편의일 뿐이고 실제 차단은 서버의 RLS 가 합니다.**
+브라우저에서 무엇을 하든 운영자가 아니면 `dictionary` 에 못 씁니다.
+
+### 개인 진도 병합
 
 **통째로 덮어쓰지 않습니다.** 카드마다 마지막 복습 시각을 비교해 최신본을 고릅니다.
 그래서 폰에서 공부한 뒤 PC를 켜도 폰 진도가 사라지지 않습니다.
 `node tools/test_sync.js` 가 이 시나리오를 검증합니다.
 
-설정하지 않으면 동기화만 꺼진 채 로컬 전용으로 그대로 돌아갑니다.
+설정하지 않으면 계정 기능만 꺼진 채 로컬 전용으로 그대로 돌아갑니다.
+
+> 예전에는 24자 코드를 아는 기기끼리 한 행을 같이 썼습니다. 그 방식은 RLS 가
+> `using (true)` 라서 anon 키만 있으면 **아무나 남의 진도를 읽고 덮어쓸 수 있었습니다.**
+> 혼자 쓸 땐 문제가 없었지만 여러 사람이 쓰는 순간 못 씁니다. `schema.sql` 이
+> 그 테이블을 지웁니다.
 
 ## 채점 방식
 
@@ -466,7 +525,9 @@ js/
   grader.js         채점 (성/철자 분리, 움라우트, 오타 허용)
   srs.js            간격 반복 스케줄러
   store.js          localStorage 영속화 · 백업
-  sync.js           기기 간 동기화 (항목 단위 병합)
+  auth.js           계정 (Supabase Auth · 이메일+비번 · 역할)
+  dict.js           ★ 공용 뜻 사전 (빌드에 구운 것 + 델타 · 운영자 발행)
+  sync.js           개인 기록 동기화 (항목 단위 병합)
   drills.js         단어 드릴
   grammar-drills.js 문법 드릴
   order-drills.js   받아쓰기 · 문체 변환
@@ -484,10 +545,13 @@ data/
   nouns.js verbs.js adjectives.js functionwords.js   ← 자동 생성 (PDF 추출)
   prefixes.js prefixverbs.js                        ← 손으로 씀 (접두사 35 · 동사 61)
   grammar.js pronouns.js sentences.js                ← 손으로 작성
-  config.js                                          ← 동기화 설정 (선택)
+  dict.js                                            ← 공용 사전 (pull_dict.py 생성)
+  config.js                                          ← 서버 설정 (선택, 커밋 안 함)
 tools/
   extract.py parse.py build.py    추출 파이프라인
   build_dist.py                   배포 빌드
+  pull_dict.py                    공용 사전을 data/dict.js 로 굽기
+  schema.sql                      Supabase 테이블 · RLS (SQL Editor 에 붙여넣기)
   test_engines.js                 격변화·활용 엔진 85 케이스
   test_app.js                     드릴 전체 · 채점 · SRS · 임포터
   test_sync.js                    동기화 병합 (진도 유실 방지)
@@ -495,6 +559,7 @@ tools/
   test_meaning.js                 뜻 테스트 · 뜻 통계 · 레벨/성별 집계
   test_prefix.js                  접두사 분해 · 분리 판정 · ge 위치 · 시드 검증
   test_delete.js                  항목 삭제 · 되돌리기 · 깨진 항목 판정
+  test_dict.js                    공용 사전 — 층 순서 · 권한 · 델타
   prefix_seed.py                  접두사 동사 시드 뼈대 생성기
   smoke.html                      브라우저에서 실제로 눌러 보는 점검
   mobile.html                     폰 레이아웃 측정 (?w=375 로 폭 지정)
@@ -514,6 +579,7 @@ node tools/test_wordorder.js # 어순 규칙 — 맞는 배열이 전부 정답�
 node tools/test_meaning.js   # 뜻 테스트 · 통계 집계 — 레벨이 겹쳐 세지지 않는지
 node tools/test_prefix.js    # 접두사 — 분리 판정 · ge 위치 · 시드 무결성
 node tools/test_delete.js    # 삭제 — 되돌리기 · 멀쩡한 낱말을 안 지우는지
+node tools/test_dict.js      # 공용 사전 — 층 순서 · 일반 사용자가 못 쓰는지
 python tools/build_dist.py   # 배포본이 실제로 동작할 모양인지
 ```
 
@@ -524,6 +590,8 @@ python tools/build_dist.py   # 배포본이 실제로 동작할 모양인지
 
 - **폰 실기 확인** — 헤드리스 크롬은 375px 뷰포트를 재현하지 못합니다.
   485px에서는 모든 화면이 가로 스크롤 없이 나오지만, 실제 폰에서 한 번 봐야 합니다.
+- **계정 실기 확인** — 로그인·발행·권한 분리는 단위 테스트로만 검증했습니다.
+  실제 Supabase 프로젝트에 붙여 가입 → 운영자 지정 → 발행까지 한 번 돌려 봐야 합니다.
 - **뜻** — 5,482개 중 213개(전치사·접속사 등)만 들어 있습니다. 뜻 채우기 탭에서 채워 나가세요.
   채운 만큼 **뜻 테스트** 범위가 자동으로 넓어집니다.
 - 목차 Part 18~24 (B2 필수 표현 · 주제별 어휘 · 말하기 · 쓰기 · 읽기 · 듣기 · 모의고사)

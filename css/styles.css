@@ -463,6 +463,18 @@ table.ref.quiz input.bad  { border-color: var(--wrong); }
 .syncstat .dot.syncing { background: var(--partial); }
 .syncstat .dot.error, .syncstat .dot.offline { background: var(--wrong); }
 
+/* 역할 배지 — 운영자인지 학습자인지 한눈에 */
+.rolebadge {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--dim); letter-spacing: .02em;
+}
+.rolebadge.admin { color: var(--accent); border-color: var(--accent); }
+
+.adminhead {
+  margin: 18px 0 6px; font-size: 14px; color: var(--accent);
+  border-top: 1px solid var(--line); padding-top: 14px;
+}
+
 /* ---------------------------------------------------------------- 어순 조립 */
 
 .asmline {

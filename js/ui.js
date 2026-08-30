@@ -50,6 +50,21 @@
 
   function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
 
+  /*
+   * 단어·뜻을 고칠 수 있는가.
+   *
+   * 서버가 설정돼 있으면 운영자만 고친다 — 뜻은 모두가 같은 것을 봐야 하기 때문이다.
+   * 설정이 없으면(file:// 로 더블클릭해 여는 경우) 지금까지처럼 전부 열어 둔다.
+   * 혼자 쓰는 사본이라 막을 이유가 없다.
+   *
+   * 화면에서 감추는 것은 편의일 뿐이고 실제 차단은 서버의 RLS 가 한다.
+   */
+  function canEdit() {
+    var Au = global.Auth;
+    if (!Au || !Au.configured()) return true;
+    return Au.isAdmin();
+  }
+
   function genderClass(g) { return g ? 'g-' + g : ''; }
 
   function levelTags(levels) {
@@ -791,6 +806,11 @@
   /** 뜻 입력 한 줄. Enter 로 저장되고 저장하면 그 자리에서 확정된다. */
   function meaningForm(slot, e) {
     clear(slot);
+    if (!canEdit()) {
+      slot.appendChild(el('span', { class: 'muted small',
+        text: '뜻이 아직 없습니다 — 운영자가 채우면 자동으로 받습니다.' }));
+      return;
+    }
     var inp = el('input', {
       type: 'text', class: 'meaninput', autocomplete: 'off', spellcheck: 'false',
       value: e.ko || '', placeholder: '뜻을 적어 두세요 (Enter 저장)'
@@ -1051,7 +1071,7 @@
           } }),
         el('span', { class: 'small', text: '지운 것 보기 (' + S.deletedCount() + ')' })
       ]),
-      el('button', { class: 'btn ghost', text: '단어 추가', onclick: viewImport })
+      canEdit() ? el('button', { class: 'btn ghost', text: '단어 추가', onclick: viewImport }) : null
     ]);
     var extra = [];
     if (listState.broken) {
@@ -1062,7 +1082,7 @@
           '참고문헌 조각이 낱말로 읽힌 것들입니다. 멀쩡한 낱말이 섞여 있을 수 있으니 ' +
           '한 번 훑어보고 지우세요.' }),
         el('div', { class: 'actions leftish' }, [
-          el('button', { class: 'btn ghost danger',
+          !canEdit() ? null : el('button', { class: 'btn ghost danger',
             text: '이 조건의 ' + broken.length.toLocaleString() + '개 전부 삭제',
             onclick: function () {
               if (!broken.length) return;
@@ -1289,7 +1309,7 @@
     box.appendChild(grid);
 
     box.appendChild(el('div', { class: 'actions' }, [
-      el('button', { class: 'btn', text: '저장', onclick: function () {
+      !canEdit() ? null : el('button', { class: 'btn', text: '저장', onclick: function () {
         var patch = {};
         Object.keys(inputs).forEach(function (k) {
           var i = inputs[k];
@@ -1307,7 +1327,8 @@
         row.nextSibling.remove();
       } }),
       // 원문에서 잘못 딸려 온 항목을 여기서 뺀다. 되돌릴 수 있다.
-      S.isDeleted(e.id)
+      !canEdit() ? null
+        : S.isDeleted(e.id)
         ? el('button', { class: 'btn ghost', text: '되돌리기', onclick: function () {
             S.restoreWord(e.id); S.saveNow();
             WORDS = loadWords(); POOL = buildPool();
@@ -1373,7 +1394,44 @@
    * 뜻만 빠르게 채워 넣는 화면.
    * Enter 로 저장 -> 다음 단어 -> 포커스 유지. 손이 키보드를 안 떠나게 한다.
    */
+  /**
+   * 뜻 테스트만 있는 화면 (일반 사용자용).
+   *
+   * 뜻은 운영자가 채우므로 입력칸과 삭제 버튼을 뺐다. 대신 시험 범위가
+   * 지금 얼마인지 보여 준다 — 사전이 채워질수록 저절로 넓어지기 때문이다.
+   */
+  function viewMeaningTests() {
+    var M = global.Meanings;
+    var c = M.counts(WORDS);
+    var pct = c.total ? Math.round(100 * c.filled / c.total) : 0;
+
+    render([
+      el('h2', { text: '뜻 테스트' }),
+      el('p', { class: 'muted small', text:
+        '뜻이 적힌 ' + c.filled.toLocaleString() + '개가 출제 범위입니다 (전체 ' +
+        c.total.toLocaleString() + '개 중 ' + pct + '%). 운영자가 뜻을 채우면 범위가 넓어집니다.' }),
+      el('div', { class: 'bar', html: '<i style="width:' + pct + '%"></i>' }),
+      el('div', { class: 'actions' }, [
+        el('button', { class: 'btn', text: '뜻 테스트 (독→뜻)',
+          onclick: function () { startMeaningTest('de'); } }),
+        el('button', { class: 'btn', text: '뜻 테스트 (뜻→독)',
+          onclick: function () { startMeaningTest('ko'); } }),
+        el('button', { class: 'btn ghost', text: '섞어서',
+          onclick: function () { startMeaningTest(null); } })
+      ]),
+      c.filled ? null : el('div', { class: 'empty' }, [
+        el('p', { text: '아직 뜻이 채워진 단어가 없습니다.' }),
+        el('p', { class: 'small', text:
+          '운영자가 채우면 자동으로 받습니다. 설정 > 계정에서 "지금 동기화" 를 눌러도 됩니다.' })
+      ]),
+      el('p', { class: 'muted small', text:
+        '채점에서 답지에 없는 표현이 사실 맞으면 "정답으로 인정" 을 누르세요. ' +
+        '그 답은 내 기록에만 더해지고 다음부터 정답 처리됩니다.' })
+    ]);
+  }
+
   function viewMeanings() {
+    if (!canEdit()) return viewMeaningTests();
     var M = global.Meanings;
     var st = M.state;
     st.list = M.build(WORDS);
@@ -2524,8 +2582,8 @@
           '많이 넣으면 며칠 뒤 복습이 몰립니다. 15~30 정도를 권합니다.' })
       ]),
 
-      el('h3', { text: '기기 간 동기화' }),
-      syncCard(),
+      el('h3', { text: '계정 · 동기화' }),
+      accountCard(),
 
       el('h3', { text: '백업' }),
       el('div', { class: 'card' }, [
@@ -2570,73 +2628,191 @@
   }
 
   /**
-   * 동기화 설정.
-   * data/config.js 가 없으면 안내만 보여주고 기능은 꺼진 채로 둔다.
+   * 계정 · 동기화.
+   *
+   * 설정(data/config.js)이 없으면 안내만 보여주고 기능은 꺼진 채로 둔다 —
+   * file:// 로 더블클릭해 여는 경우가 그렇다. 학습은 그대로 되고 이 기기에만 남는다.
    */
-  function syncCard() {
-    var Sy = global.Sync;
-    if (!Sy) return el('div', { class: 'card' }, [
-      el('p', { class: 'muted small', text: 'sync.js 를 불러오지 못했습니다.' })
+  function accountCard() {
+    var Sy = global.Sync, Au = global.Auth, Dc = global.Dict;
+    if (!Au) return el('div', { class: 'card' }, [
+      el('p', { class: 'muted small', text: 'auth.js 를 불러오지 못했습니다.' })
     ]);
 
     var box = el('div', { class: 'card' });
+    var busy = false;
+
+    function note(text) { return el('p', { class: 'muted small', text: text }); }
+
+    /** 로그인·발행 뒤에는 단어를 다시 읽어야 새 뜻이 화면에 반영된다 */
+    function reload() {
+      WORDS = loadWords();
+      POOL = buildPool();
+    }
+
+    // ------------------------------------------------ 로그인 전
+    function paintAnon() {
+      var email = el('input', {
+        type: 'email', placeholder: '이메일', spellcheck: 'false',
+        autocomplete: 'username', value: Au.state.email || ''
+      });
+      var pw = el('input', {
+        type: 'password', placeholder: '비밀번호 (6자 이상)',
+        autocomplete: 'current-password'
+      });
+      var msg = el('p', { class: 'muted small' });
+
+      function run(fn, label) {
+        if (busy) return;
+        var e = email.value.trim(), p = pw.value;
+        if (!e || !p) { msg.textContent = '이메일과 비밀번호를 넣어 주세요.'; return; }
+        busy = true;
+        msg.textContent = label + '…';
+        fn(e, p).then(function (r) {
+          busy = false;
+          if (r && r.confirmNeeded) { paint(); return; }
+          // 로그인 직후: 서버 기록을 받아 병합하고 사전도 갱신한다
+          return Promise.all([
+            Sy ? Sy.syncNow() : null,
+            Dc ? Dc.pull() : null
+          ]).then(function () { reload(); paint(); });
+        })['catch'](function (err) {
+          busy = false;
+          msg.textContent = err.message;
+        });
+      }
+
+      // Enter 로 바로 로그인
+      [email, pw].forEach(function (i) {
+        i.addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter') { ev.preventDefault(); run(Au.signIn, '로그인하는 중'); }
+        });
+      });
+
+      box.appendChild(el('p', { text:
+        '로그인하면 기기끼리 진도가 합쳐지고, 운영자가 채운 뜻을 받습니다.' }));
+      box.appendChild(el('div', { class: 'meanrow', style: 'margin-top:12px' }, [email]));
+      box.appendChild(el('div', { class: 'meanrow', style: 'margin-top:8px' }, [pw]));
+      box.appendChild(el('div', { class: 'actions leftish' }, [
+        el('button', { class: 'btn', text: '로그인',
+          onclick: function () { run(Au.signIn, '로그인하는 중'); } }),
+        el('button', { class: 'btn ghost', text: '가입',
+          onclick: function () { run(Au.signUp, '가입하는 중'); } }),
+        el('button', { class: 'btn ghost', text: '비밀번호 재설정', onclick: function () {
+          var e = email.value.trim();
+          if (!e) { msg.textContent = '이메일을 넣어 주세요.'; return; }
+          Au.resetPassword(e).then(function () {
+            msg.textContent = '재설정 메일을 보냈습니다. 받은 편지함을 확인해 주세요.';
+          })['catch'](function (err) { msg.textContent = err.message; });
+        } })
+      ]));
+      if (Au.state.message) msg.textContent = Au.state.message;
+      box.appendChild(msg);
+      box.appendChild(note('로그인하지 않아도 학습은 그대로 됩니다. 다만 이 기기에만 저장됩니다.'));
+    }
+
+    // ------------------------------------------------ 로그인 후
+    function paintIn() {
+      var admin = Au.isAdmin();
+
+      box.appendChild(el('div', { class: 'syncstat' }, [
+        el('b', { text: Au.state.email || '(이메일 없음)' }),
+        el('span', { class: 'rolebadge ' + (admin ? 'admin' : 'user'),
+                     text: admin ? '운영자' : '학습자' })
+      ]));
+
+      if (Sy) {
+        var st = Sy.state;
+        var label = { off: '꺼짐', idle: '동기화됨', syncing: '동기화 중…',
+                      error: '오류', offline: '오프라인' }[st.status] || st.status;
+        box.appendChild(el('div', { class: 'syncstat' }, [
+          el('span', { class: 'dot ' + st.status }),
+          el('span', { class: 'small', text: label }),
+          st.message ? el('span', { class: 'muted small', text: '  ' + st.message }) : null,
+          st.lastPull ? el('span', { class: 'muted small',
+            text: '  · 마지막 ' + new Date(st.lastPull).toLocaleTimeString() }) : null
+        ]));
+      }
+
+      if (Dc) {
+        var d = Dc.state;
+        box.appendChild(el('p', { class: 'muted small', text:
+          '공용 사전 ' + (d.baked + d.delta) + '개' + (d.message ? ' · ' + d.message : '') }));
+      }
+
+      box.appendChild(el('div', { class: 'actions leftish' }, [
+        el('button', { class: 'btn', text: '지금 동기화', onclick: function () {
+          if (!Sy) return;
+          Promise.all([Sy.syncNow(), Dc ? Dc.pull() : null]).then(function () {
+            reload(); paint();
+          });
+          paint();
+        } }),
+        el('button', { class: 'btn ghost', text: '로그아웃', onclick: function () {
+          if (!confirm('로그아웃할까요? 이 기기의 학습 기록은 지우지 않습니다.')) return;
+          Au.signOut().then(paint);
+        } })
+      ]));
+
+      if (admin) paintAdmin();
+      else box.appendChild(note('뜻은 운영자가 채웁니다. 새로 채워지면 자동으로 받습니다.'));
+    }
+
+    // ------------------------------------------------ 운영자 전용
+    function paintAdmin() {
+      var pending = Dc ? Dc.pendingCount() : 0;
+      var msg = el('p', { class: 'muted small' });
+
+      box.appendChild(el('h4', { class: 'adminhead', text: '사전 발행' }));
+      box.appendChild(el('p', { class: 'muted small', text: pending
+        ? '아직 안 올린 수정이 ' + pending + '개 있습니다. 발행하면 모든 사용자에게 반영됩니다.'
+        : '올릴 수정이 없습니다. 뜻을 채우면 여기 쌓입니다.' }));
+
+      box.appendChild(el('div', { class: 'actions leftish' }, [
+        el('button', {
+          class: 'btn' + (pending ? '' : ' ghost'),
+          text: pending ? '사전에 발행 (' + pending + ')' : '사전에 발행',
+          disabled: pending ? null : true,
+          onclick: function () {
+            if (busy || !pending) return;
+            busy = true;
+            msg.textContent = '올리는 중…';
+            Dc.publishLocal().then(function () {
+              busy = false;
+              reload();
+              paint();
+            })['catch'](function (e) {
+              busy = false;
+              msg.textContent = e.message;
+            });
+          }
+        })
+      ]));
+      box.appendChild(msg);
+      box.appendChild(note('발행하면 이 기기의 로컬 수정이 사전으로 옮겨집니다. ' +
+        '올리기 전까지는 나에게만 보입니다.'));
+    }
 
     function paint() {
       clear(box);
-
-      if (!Sy.configured()) {
-        box.appendChild(el('p', { text: '동기화가 설정되지 않았습니다 — 이 기기에만 저장됩니다.' }));
-        box.appendChild(el('p', { class: 'muted small', text:
+      if (!Au.configured()) {
+        box.appendChild(el('p', { text: '서버가 설정되지 않았습니다 — 이 기기에만 저장됩니다.' }));
+        box.appendChild(note(
           'data/config.example.js 를 data/config.js 로 복사하고 Supabase 주소와 키를 넣으면 ' +
-          '켜집니다. 방법은 그 파일 맨 위 주석에 있습니다.' }));
+          '계정과 동기화가 켜집니다. 스키마는 tools/schema.sql 을 SQL Editor 에 붙여넣으세요.'));
         return;
       }
-
-      var st = Sy.state;
-      var label = { off: '꺼짐', idle: '동기화됨', syncing: '동기화 중…',
-                    error: '오류', offline: '오프라인' }[st.status] || st.status;
-
-      box.appendChild(el('div', { class: 'syncstat' }, [
-        el('span', { class: 'dot ' + st.status }),
-        el('b', { text: label }),
-        st.message ? el('span', { class: 'muted small', text: '  ' + st.message }) : null,
-        st.lastPull ? el('span', { class: 'muted small',
-          text: '  · 마지막 ' + new Date(st.lastPull).toLocaleTimeString() }) : null
-      ]));
-
-      var codeIn = el('input', {
-        type: 'text', value: Sy.getCode() || '', spellcheck: 'false',
-        placeholder: '동기화 코드'
-      });
-
-      box.appendChild(el('div', { class: 'meanrow', style: 'margin-top:12px' }, [
-        codeIn,
-        el('button', { class: 'btn ghost', text: '저장', onclick: function () {
-          Sy.setCode(codeIn.value.trim() || null);
-          Sy.syncNow().then(paint);
-          paint();
-        } })
-      ]));
-
-      box.appendChild(el('div', { class: 'actions leftish' }, [
-        el('button', { class: 'btn', text: '지금 동기화',
-          onclick: function () { Sy.syncNow().then(paint); paint(); } }),
-        el('button', { class: 'btn ghost', text: '새 코드 만들기', onclick: function () {
-          var c = Sy.newCode();
-          codeIn.value = c;
-          Sy.setCode(c);
-          Sy.syncNow().then(paint);
-          paint();
-        } })
-      ]));
-
-      box.appendChild(el('p', { class: 'muted small', text:
-        '다른 기기에 같은 코드를 넣으면 진도가 합쳐집니다. 통째로 덮어쓰지 않고 ' +
-        '카드마다 최신 기록을 골라 병합하므로, 양쪽에서 공부해도 진도가 사라지지 않습니다.' }));
+      if (Au.state.status === 'loading') {
+        box.appendChild(el('p', { class: 'muted', text: Au.state.message || '확인하는 중…' }));
+        return;
+      }
+      if (Au.loggedIn()) paintIn();
+      else paintAnon();
     }
 
     paint();
-    Sy.on(function () { paint(); });
+    Au.on(function () { paint(); });
+    if (Sy) Sy.on(function () { paint(); });
     return box;
   }
 
@@ -2677,6 +2853,12 @@
     nodes.forEach(function (n) { if (n) app.appendChild(n); });
   }
 
+  /** 권한에 따라 탭 이름을 맞춘다. 로그인 상태가 바뀌면 다시 부른다. */
+  function relabelNav() {
+    var b = document.querySelector('#nav button[data-view=meanings]');
+    if (b) b.textContent = canEdit() ? '뜻 채우기' : '뜻 테스트';
+  }
+
   function go(view) {
     session = null;
     document.querySelectorAll('#nav button').forEach(function (b) {
@@ -2700,6 +2882,9 @@
     document.querySelectorAll('#nav button').forEach(function (b) {
       b.addEventListener('click', function () { go(b.getAttribute('data-view')); });
     });
+
+    // 뜻을 못 쓰는 사람에게 '뜻 채우기' 는 틀린 이름이다
+    relabelNav();
 
     // Enter 로 제출 -> Enter 로 다음. 표 문제는 Tab 으로 칸 이동.
     document.addEventListener('keydown', function (ev) {
@@ -2741,15 +2926,35 @@
 
     go('home');
 
-    // 동기화가 설정돼 있으면 받아서 병합한 뒤 화면을 다시 그린다
-    if (global.Sync && global.Sync.configured()) {
-      global.Sync.start().then(function (ok) {
-        if (!ok) return;
-        WORDS = loadWords();
-        POOL = buildPool();
-        if (!session) go('home');
-      });
-    }
+    bootstrapServer();
+  }
+
+  /*
+   * 서버 쪽 준비. 순서가 있다.
+   *
+   *   1. 세션 복원   — 내가 누구인지, 운영자인지 정해야 화면이 맞게 그려진다
+   *   2. 공용 사전   — 로그인하지 않아도 읽는다. 뜻은 누구에게나 보여야 한다
+   *   3. 개인 기록   — 로그인했을 때만. 카드 단위로 병합한다
+   *
+   * 어느 단계가 실패해도 앱은 그대로 돈다. 서버가 죽어도 학습은 되어야 한다.
+   */
+  function bootstrapServer() {
+    var Au = global.Auth, Dc = global.Dict, Sy = global.Sync;
+    if (!Au || !Au.configured()) return;
+
+    Au.restore().then(function () {
+      relabelNav();
+      return Dc ? Dc.pull() : null;
+    }).then(function () {
+      return (Sy && Au.loggedIn()) ? Sy.start() : null;
+    }).then(function () {
+      WORDS = loadWords();
+      POOL = buildPool();
+      relabelNav();
+      if (!session) go('home');
+    })['catch'](function (e) {
+      console.warn('서버 준비에 실패했습니다 — 로컬 전용으로 계속합니다.', e);
+    });
   }
 
   if (document.readyState === 'loading') {

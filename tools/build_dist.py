@@ -8,10 +8,11 @@
   dist/              호스팅에 그대로 올리는 폴더 (PWA·서비스워커 포함)
   dist/single.html   전부 인라인한 단일 파일 — 인터넷 없이 폰에 넣어 쓰는 백업본
 
-호스팅은 Cloudflare Pages 드래그 앤 드롭을 권한다.
-  1. dash.cloudflare.com > Workers & Pages > Create > Pages > Upload assets
-  2. dist 폴더를 통째로 끌어다 놓기
-  3. 나오는 주소를 폰에서 열고 '홈 화면에 추가'
+배포는 main 에 푸시하면 GitHub Actions 가 알아서 한다
+(.github/workflows/deploy.yml). 이 스크립트를 손으로 돌릴 일은
+dist 를 직접 확인하거나 다른 곳에 올릴 때뿐이다.
+
+최신 공용 사전을 실으려면 먼저 tools/pull_dict.py 를 돌린다.
 
 서비스워커는 https 에서만 동작하므로 호스팅해야 오프라인이 된다.
 로컬에서 index.html 을 더블클릭하는 방식은 지금처럼 그대로 쓸 수 있다.

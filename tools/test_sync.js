@@ -176,21 +176,40 @@ eq('없던 필드여도 안 터짐',   Object.keys(Sync.mergeAliases(undefined, 
 mAli['n:zug'].push('오염');
 eq('원본 불변', pcAli['n:zug'].length, 1);
 
-// ---------------------------------------------------------------- 설정 없이 동작
+// ---------------------------------------------------------------- 켜지는 조건
+//
+// 동기화는 '설정이 있고 + 로그인했을 때' 만 켜진다.
+// 둘 중 하나라도 없으면 조용히 로컬 전용이어야 한다 (file:// 로 여는 경우).
 
-console.log('동기화 설정이 없을 때');
+console.log('설정도 로그인도 없을 때');
 eq('configured() false', Sync.configured(), false);
-Sync.setCode(null);
-eq('enabled false', Sync.state.enabled, false);
+eq('refresh() false', Sync.refresh(), false);
 eq('status off', Sync.state.status, 'off');
 Sync.schedulePush();          // 아무 일도 없어야 한다
 eq('pending 안 켜짐', Sync.state.pending, false);
 
-console.log('동기화 코드 생성');
-var c1 = Sync.newCode(), c2 = Sync.newCode();
-if (c1 === c2) bad('코드가 매번 같다');
-if (c1.replace(/-/g, '').length !== 24) bad('코드 길이 ' + c1.length);
-console.log('  예: ' + c1);
+console.log('설정만 있고 로그인은 안 했을 때');
+sandbox.window.SYNC_CONFIG = { url: 'https://x.supabase.co', key: 'anon-key' };
+eq('configured() true', Sync.configured(), true);
+eq('로그인 전에는 꺼짐', Sync.refresh(), false);
+Sync.schedulePush();
+eq('pending 여전히 꺼짐', Sync.state.pending, false);
+
+console.log('로그인하면');
+sandbox.window.Auth = {
+  loggedIn: function () { return true; },
+  userId: function () { return 'user-1'; },
+  headers: function () { return Promise.resolve({}); }
+};
+eq('켜짐', Sync.refresh(), true);
+eq('status idle', Sync.state.status, 'idle');
+Sync.schedulePush();
+eq('pending 켜짐', Sync.state.pending, true);
+
+console.log('로그아웃하면 다시 꺼진다');
+sandbox.window.Auth.loggedIn = function () { return false; };
+eq('꺼짐', Sync.refresh(), false);
+eq('status off', Sync.state.status, 'off');
 
 console.log('\n' + (fails ? 'X 실패 ' + fails + '건' : 'OK 전부 통과'));
 process.exit(fails ? 1 : 0);

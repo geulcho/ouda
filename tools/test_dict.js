@@ -199,6 +199,103 @@ sandbox.window.SYNC_CONFIG = { url: 'https://x.supabase.co', key: 'anon' };
 sandbox.window.Auth = { isAdmin: function () { return false; }, headers: function () { return Promise.resolve({}); } };
 eq('canWrite false', Dict.canWrite(), false);
 
+// ---------------------------------------------------------------- 발행
+//
+// 621개를 이관하는 것이 실제 시나리오다. 한 요청에 다 담으면 그것이 실패 지점이
+// 되므로 나눠 보내고, 중간에 끊겨도 올라간 것만 로컬에서 지워야 한다.
+
+/** 성공하는 가짜 서버. 받은 덩이를 기록한다. */
+function fakeServer(failAfter) {
+  var batches = [];
+  sandbox.fetch = function (url, opts) {
+    var body = JSON.parse(opts.body);
+    if (failAfter !== undefined && batches.length >= failAfter) {
+      return Promise.resolve({
+        ok: false, status: 500,
+        text: function () { return Promise.resolve('서버 터짐'); }
+      });
+    }
+    batches.push(body);
+    var back = body.map(function (r) {
+      var c = JSON.parse(JSON.stringify(r));
+      c.updated_at = '2026-04-0' + batches.length + 'T00:00:00Z';
+      return c;
+    });
+    return Promise.resolve({
+      ok: true, status: 200,
+      json: function () { return Promise.resolve(back); },
+      text: function () { return Promise.resolve(''); }
+    });
+  };
+  return batches;
+}
+
+function seed(n) {
+  resetStore();
+  setDict({});
+  for (var i = 0; i < n; i++) Store.editWord('w' + i, { ko: '뜻' + i });
+}
+
+var publishTests = function () {
+  console.log('많은 뜻을 발행하면 나눠 보낸다');
+  seed(950);
+  var batches = fakeServer();
+  eq('대기 950개', Dict.pendingCount(), 950);
+
+  return Dict.publishLocal().then(function (n) {
+    eq('950개 발행됨', n, 950);
+    eq('덩이 3개로 나뉨', batches.length, 3);
+    eq('첫 덩이 400개', batches[0].length, 400);
+    eq('마지막 덩이 150개', batches[2].length, 150);
+    eq('로컬 대기 비워짐', Dict.pendingCount(), 0);
+    eq('사전에 들어감', Object.keys(Dict.patches()).length, 950);
+    eq('뜻이 맞음', Dict.patches()['w0'].ko, '뜻0');
+    eq('_ts 가 안 올라감', batches[0][0].patch._ts, undefined);
+  })
+
+  .then(function () {
+    console.log('중간에 끊기면 올라간 것만 지운다');
+    seed(950);
+    var b2 = fakeServer(2);          // 2덩이만 성공하고 3번째에서 실패
+    return Dict.publishLocal().then(function () {
+      bad('실패해야 하는데 성공했다');
+    })['catch'](function (e) {
+      eq('두 덩이만 갔음', b2.length, 2);
+      eq('올라간 800개는 로컬에서 빠짐', Dict.pendingCount(), 150);
+      eq('사전에는 800개', Object.keys(Dict.patches()).length, 800);
+      if (!/800개까지/.test(Dict.state.message)) bad('어디까지 갔는지 안 알려줌: ' + Dict.state.message);
+    });
+  })
+
+  .then(function () {
+    console.log('다시 누르면 남은 것이 이어서 올라간다');
+    var b3 = fakeServer();
+    return Dict.publishLocal().then(function (n) {
+      eq('남은 150개 발행', n, 150);
+      eq('한 덩이면 충분', b3.length, 1);
+      eq('이제 대기 0', Dict.pendingCount(), 0);
+      eq('사전에 950개 전부', Object.keys(Dict.patches()).length, 950);
+    });
+  })
+
+  .then(function () {
+    console.log('지운 항목·답지도 함께 올라간다');
+    resetStore();
+    setDict({});
+    fakeServer();
+    Store.editWord('n:Zug', { ko: '기차' });
+    Store.addAlias('n:Zug', '열차');
+    Store.deleteWord('adj:깨진것');
+    eq('대기 2개 (같은 id 는 하나)', Dict.pendingCount(), 2);
+    return Dict.publishLocal().then(function () {
+      eq('뜻 올라감', Dict.patches()['n:Zug'].ko, '기차');
+      eq('답지 올라감', Dict.aliases()['n:Zug'][0], '열차');
+      eq('삭제 올라감', !!Dict.deleted()['adj:깨진것'], true);
+      eq('로컬 비워짐', Dict.pendingCount(), 0);
+    });
+  });
+};
+
 var done = 0;
 function finish() {
   console.log('\n' + (fails ? 'X 실패 ' + fails + '건' : 'OK 전부 통과'));
@@ -232,4 +329,5 @@ Dict.setMeaning('n:Zug', '몰래 쓴 뜻').then(function () {
   resetStore();
   eq('비우면 0', Dict.pendingCount(), 0);
 })
+.then(publishTests)
 .then(finish, function (e) { bad('예외: ' + (e && e.stack || e)); finish(); });

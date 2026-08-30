@@ -348,52 +348,94 @@
     state.message = list.length + '개 올리는 중…';
     emit();
 
-    return global.Auth.headers({
-      'Prefer': 'resolution=merge-duplicates,return=representation'
-    }).then(function (h) {
-      return fetch(base() + TABLE, { method: 'POST', headers: h, body: JSON.stringify(list) });
-    }).then(function (r) {
-      if (!r.ok) {
-        return r.text().then(function (t) {
-          throw new Error(r.status === 401 || r.status === 403
-            ? '권한이 없습니다. 운영자 계정으로 로그인했는지 확인해 주세요.'
-            : ('사전 발행 실패 (HTTP ' + r.status + ') ' + t.slice(0, 160)));
-        });
-      }
-      return r.json();
-    }).then(function (back) {
-      var saved = back && back.length ? back : list;
-      load();
-      var cached = readCache() || { rows: {}, since: null };
-      saved.forEach(function (row) {
-        rows[row.id] = normalize(row);
-        cached.rows[row.id] = rows[row.id];
-        if (row.updated_at && (!cached.since || row.updated_at > cached.since)) {
-          cached.since = row.updated_at;
+    /*
+     * 나눠 보낸다. 처음 이관할 때는 수백 개, 사전이 다 차면 5,000개가 넘는데
+     * 한 요청에 다 담으면 그 요청 하나가 실패 지점이 된다.
+     *
+     * 한 덩이가 성공할 때마다 로컬에 반영하므로, 중간에 끊겨도 거기까지는
+     * 남는다. 남은 것은 다시 누르면 이어서 올라간다 (upsert 라 두 번 올라가도 같다).
+     */
+    var CHUNK = 400;
+    var chunks = [];
+    for (var i = 0; i < list.length; i += CHUNK) chunks.push(list.slice(i, i + CHUNK));
+
+    var savedIds = {};
+    var done = 0;
+
+    function sendOne(part) {
+      return global.Auth.headers({
+        'Prefer': 'resolution=merge-duplicates,return=representation'
+      }).then(function (h) {
+        return fetch(base() + TABLE, { method: 'POST', headers: h, body: JSON.stringify(part) });
+      }).then(function (r) {
+        if (!r.ok) {
+          return r.text().then(function (t) {
+            throw new Error(r.status === 401 || r.status === 403
+              ? '권한이 없습니다. 운영자 계정으로 로그인했는지 확인해 주세요.'
+              : ('사전 발행 실패 (HTTP ' + r.status + ') ' + t.slice(0, 160)));
+          });
         }
+        return r.json();
+      }).then(function (back) {
+        var saved = (back && back.length) ? back : part;
+        load();
+        var cached = readCache() || { rows: {}, since: null };
+        saved.forEach(function (row) {
+          rows[row.id] = normalize(row);
+          cached.rows[row.id] = rows[row.id];
+          savedIds[row.id] = true;
+          if (row.updated_at && (!cached.since || row.updated_at > cached.since)) {
+            cached.since = row.updated_at;
+          }
+        });
+        invalidate();
+        writeCache(cached);
+        state.delta = Object.keys(cached.rows).length;
+        state.since = cached.since;
+
+        done += saved.length;
+        state.message = done + ' / ' + list.length + '개 올리는 중…';
+        emit();
       });
-      invalidate();
-      writeCache(cached);
-      state.delta = Object.keys(cached.rows).length;
-      state.since = cached.since;
+    }
 
-      // 사전에 들어갔으므로 로컬 사본은 버린다
-      s.edits = {};
-      s.deleted = {};
-      s.aliases = {};
-      s.added = [];
+    // 순서대로 — 동시에 던지면 실패했을 때 어디까지 올라갔는지 알 수 없다
+    var chain = Promise.resolve();
+    chunks.forEach(function (part) {
+      chain = chain.then(function () { return sendOne(part); });
+    });
+
+    return chain.then(function () {
+      // 사전에 들어간 것만 로컬에서 지운다
+      dropPublished(s, savedIds);
       S.saveNow();
-
       state.status = 'idle';
-      state.message = saved.length + '개 발행됨';
+      state.message = done + '개 발행됨';
       emit();
-      return saved.length;
+      return done;
     })['catch'](function (e) {
+      // 중간에 끊겼어도 올라간 것은 지운다. 남은 것은 다시 누르면 이어진다.
+      dropPublished(s, savedIds);
+      S.saveNow();
       state.status = 'error';
-      state.message = e.message;
+      state.message = e.message + (done ? ' (' + done + '개까지 올라갔습니다)' : '');
       emit();
       throw e;
     });
+  }
+
+  /** 사전에 들어간 항목만 로컬 사본에서 뺀다 */
+  function dropPublished(s, savedIds) {
+    Object.keys(s.edits || {}).forEach(function (id) {
+      if (savedIds[id]) delete s.edits[id];
+    });
+    Object.keys(s.deleted || {}).forEach(function (id) {
+      if (savedIds[id]) delete s.deleted[id];
+    });
+    Object.keys(s.aliases || {}).forEach(function (id) {
+      if (savedIds[id]) delete s.aliases[id];
+    });
+    s.added = (s.added || []).filter(function (w) { return !(w && savedIds[w.id]); });
   }
 
   /** 아직 사전에 안 올린 로컬 변경 수 — 발행 버튼에 띄운다 */

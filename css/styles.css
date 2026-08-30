@@ -470,6 +470,22 @@ table.ref.quiz input.bad  { border-color: var(--wrong); }
 }
 .rolebadge.admin { color: var(--accent); border-color: var(--accent); }
 
+/* 동음이의어 분리 안내 */
+.card.notice { border-color: var(--accent); }
+.splitrow {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 7px 0; border-top: 1px solid var(--line);
+}
+.splitrow code {
+  font-family: Consolas, "Courier New", monospace; color: var(--dim);
+  font-size: 12px; min-width: 90px;
+}
+.linkish {
+  background: none; border: 0; padding: 2px 0; cursor: pointer;
+  color: var(--accent); font-size: 13px; text-align: left;
+}
+.linkish:hover { text-decoration: underline; }
+
 .adminhead {
   margin: 18px 0 6px; font-size: 14px; color: var(--accent);
   border-top: 1px solid var(--line); padding-top: 14px;

@@ -1430,6 +1430,62 @@
     ]);
   }
 
+  /*
+   * 동음이의어가 나뉜 뒤 한 번 보여주는 안내.
+   *
+   * v1 까지는 der Laden(가게) 과 laden(싣다) 이 같은 항목이었다. 적어 둔 뜻이
+   * 둘 중 어느 쪽이었는지 알 방법이 없어 양쪽에 복사해 두었으므로,
+   * 사람이 한 번 보고 틀린 쪽을 고쳐야 한다.
+   */
+  function splitNotice(after) {
+    var rev = S.splitReview();
+    if (!rev) return null;
+    var olds = Object.keys(rev);
+    if (!olds.length) return null;
+
+    var byId = {};
+    WORDS.forEach(function (w) { byId[w.id] = w; });
+
+    var rows = [];
+    olds.sort().forEach(function (old) {
+      var pair = (rev[old] || []).map(function (nid) {
+        var w = byId[nid];
+        if (!w) return null;
+        return el('button', {
+          class: 'linkish', title: '이 단어를 고치러 갑니다',
+          text: w.de + (w.ko ? '  —  ' + w.ko : '  —  (뜻 없음)'),
+          onclick: function () {
+            global.Meanings.state.focusId = nid;
+            global.Meanings.state.onlyEmpty = false;
+            viewMeanings();
+          }
+        });
+      }).filter(Boolean);
+      if (pair.length < 2) return;
+      rows.push(el('div', { class: 'splitrow' }, [
+        el('code', { text: old }),
+        el('span', { class: 'muted small', text: '→' })
+      ].concat(pair)));
+    });
+
+    if (!rows.length) return null;
+
+    return el('div', { class: 'card notice' }, [
+      el('b', { text: '동음이의어 ' + rows.length + '쌍이 나뉘었습니다' }),
+      el('p', { class: 'muted small', text:
+        '예전에는 der Laden(가게) 과 laden(싣다) 이 같은 항목이라, 한쪽에 적은 뜻이 ' +
+        '다른 쪽에도 그대로 붙었습니다. 지금은 나뉘었습니다. 적어 두신 뜻이 어느 쪽 ' +
+        '것이었는지 알 수 없어 양쪽에 복사해 두었으니, 틀린 쪽만 고쳐 주세요.' })
+    ].concat(rows).concat([
+      el('div', { class: 'actions leftish' }, [
+        el('button', { class: 'btn ghost', text: '확인했습니다', onclick: function () {
+          S.clearSplitReview();
+          (after || viewMeanings)();
+        } })
+      ])
+    ]));
+  }
+
   function viewMeanings() {
     if (!canEdit()) return viewMeaningTests();
     var M = global.Meanings;
@@ -1478,6 +1534,9 @@
       ]),
       filters
     ];
+
+    var notice = splitNotice();
+    if (notice) head.push(notice);
 
     var undo = undoBar(function () { viewMeanings(); });
     if (undo) head.push(undo);

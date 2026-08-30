@@ -54,6 +54,7 @@ jobs:
           node tools/test_prefix.js
           node tools/test_delete.js
           node tools/test_dict.js
+          node tools/test_split.js
 
       - name: 설정 파일 생성
         env:

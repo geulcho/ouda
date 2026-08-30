@@ -132,7 +132,7 @@
       else if (singOnly) { e.noPlural = true; e.pluralClass = 'Sg.'; }
       else if (m[3]) applyPluralMarker(e, m[3].trim());
       else e.noPlural = true;
-      e.id = e.de.toLowerCase().replace(/ß/g, 'ss');
+      e.id = makeId(e.de, 'noun');
       return e;
     }
 
@@ -158,14 +158,14 @@
         v.separable = true;
         v.prefix = v.pres3.split(' ').pop();
       }
-      v.id = v.de.toLowerCase().replace(/ß/g, 'ss');
+      v.id = makeId(v.de, 'verb');
       return v;
     }
 
     // 그 밖: 형용사/부사로
     if (/^[a-zäöüß]/.test(h) && h.length > 1) {
       return { pos: 'adj', de: h, levels: ['추가'], ex: [], en: '', ko: '',
-               id: h.toLowerCase().replace(/ß/g, 'ss') };
+               id: makeId(h, 'adj') };
     }
     return null;
   }
@@ -207,10 +207,38 @@
     return stem.slice(0, best) + rep + stem.slice(best + v.length);
   }
 
+  /*
+   * id 만들기. tools/build.py 와 같은 규칙이다.
+   *
+   * 접두어를 뗀 철자를 쓰되, 그 철자를 이미 다른 품사가 쓰고 있으면 n:/w: 를
+   * 붙여 나눈다. 안 그러면 der Laden(가게) 에 적은 뜻이 laden(싣다) 에도 붙는다.
+   */
+  var idCache = null;
+
+  function existingIds() {
+    if (idCache) return idCache;
+    idCache = {};
+    ['NOUNS', 'VERBS', 'ADJECTIVES', 'FUNCTIONWORDS'].forEach(function (k) {
+      (global[k] || []).forEach(function (e) { if (e && e.id) idCache[e.id] = 1; });
+    });
+    return idCache;
+  }
+
+  function makeId(de, pos) {
+    var bare = String(de || '').toLowerCase().replace(/ß/g, 'ss');
+    if (!bare) return bare;
+    var taken = existingIds();
+    var mine = (pos === 'noun' ? 'n:' : 'w:') + bare;
+    var other = (pos === 'noun' ? 'w:' : 'n:') + bare;
+    // 이미 나뉘어 있거나, 그 철자를 누가 쓰고 있으면 접두어를 붙인다
+    if (taken[mine] || taken[other] || taken[bare]) return mine;
+    return bare;
+  }
+
   function normRow(o) {
     if (!o || !o.de) return null;
-    o.id = o.id || o.de.toLowerCase().replace(/ß/g, 'ss');
     o.pos = o.pos || 'noun';
+    o.id = o.id || makeId(o.de, o.pos);
     o.levels = o.levels || ['추가'];
     o.ex = o.ex || [];
     return o;
@@ -250,6 +278,7 @@
   }
 
   global.Editor = {
+    makeId: makeId,
     looksBroken: looksBroken,
     needsReview: needsReview,
     fieldsFor: fieldsFor,

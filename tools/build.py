@@ -202,9 +202,24 @@ def main():
     master, conflicts = merge()
 
     nouns, verbs, adjs, funcs = [], [], [], []
+
+    # id 는 접두어를 뗀 철자를 쓴다 (der Zug -> "zug").
+    #
+    # 그런데 명사와 비명사가 같은 철자인 것이 76쌍 있다 — der Laden(가게) / laden(싣다),
+    # das Essen / essen, der Arm / arm. 접두어를 떼면 이 둘의 id 가 같아져서
+    # 한쪽에 적은 뜻이 다른 쪽에도 그대로 적용된다. merge() 는 n:/w: 로 제대로
+    # 갈라 놓았는데 여기서 그 구분을 버리는 것이 문제였다.
+    #
+    # 겹치는 것만 접두어를 남긴다. 나머지 5,330개는 id 를 그대로 두어야
+    # 이미 쌓인 학습 기록과 적어 둔 뜻이 끊기지 않는다.
+    bare = {}
+    for k in master:
+        bare.setdefault(k[2:], []).append(k)
+    collided = {k for k in master if len(bare[k[2:]]) > 1}
+
     for key in sorted(master):
         e = master[key]
-        e["id"] = key[2:]
+        e["id"] = key if key in collided else key[2:]
         e.pop("raw", None)
         e["levels"] = sorted(e["levels"], key=lambda l: LEVEL_RANK[l])
         e["ex"] = e["ex"][:4]                 # 예문은 넉넉히 4개까지

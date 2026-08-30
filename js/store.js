@@ -11,7 +11,7 @@
   // 저장소 키는 앱 이름이 Öuda 로 바뀐 뒤에도 그대로 둔다.
   // 바꾸면 지금까지 쌓인 학습 기록을 못 읽는다. 이름과 무관한 내부 식별자다.
   var KEY = 'deutsch-trainer';
-  var VERSION = 1;
+  var VERSION = 2;
 
   var DEFAULT_SETTINGS = {
     germanOrder: false,      // 격 순서: false = 주격·소유격·여격·목적격 (요청 형식)
@@ -63,10 +63,107 @@
     return state;
   }
 
+  /*
+   * 나뉜 id 를 찾는다.   'laden' -> ['n:laden', 'w:laden']
+   *
+   * v1 까지는 der Laden(가게) 과 laden(싣다) 이 둘 다 id 'laden' 이었다.
+   * 한쪽에 적은 뜻이 다른 쪽에도 그대로 적용되는 버그였다 (76쌍).
+   *
+   * 파서가 잘못 읽은 항목 중에 'a: dose' 처럼 콜론으로 시작하는 것이 있어서
+   * 접두어는 n / w 한 글자인 것만 인정한다.
+   */
+  function splitMap() {
+    var m = {};
+    ['NOUNS', 'VERBS', 'ADJECTIVES', 'FUNCTIONWORDS'].forEach(function (k) {
+      (global[k] || []).forEach(function (e) {
+        if (!e || !e.id) return;
+        var c = e.id.charAt(0);
+        if (e.id.charAt(1) !== ':' || (c !== 'n' && c !== 'w')) return;
+        var bare = e.id.slice(2);
+        (m[bare] = m[bare] || []).push(e.id);
+      });
+    });
+    return m;
+  }
+
+  /*
+   * v1 -> v2 : 나뉜 id 로 옮긴다.
+   *
+   * 옛 기록의 'laden' 이 가게였는지 싣다였는지는 알 방법이 없다. 버리면 적어 둔
+   * 뜻이 사라지므로 양쪽에 그대로 복사한다 — v1 에서 보이던 것과 똑같은 상태가
+   * 되고, 둘 중 틀린 쪽만 고치면 된다. 어느 것을 봐야 하는지는 splitReview 에 남긴다.
+   */
+  function splitIds(s) {
+    var map = splitMap();
+    if (!Object.keys(map).length) return false;   // 단어 데이터가 아직 안 실렸다
+
+    var review = {};
+
+    function fan(obj) {
+      if (!obj) return;
+      Object.keys(obj).forEach(function (id) {
+        var targets = map[id];
+        if (!targets) return;
+        var v = obj[id];
+        delete obj[id];
+        targets.forEach(function (nid) {
+          if (!(nid in obj)) obj[nid] = JSON.parse(JSON.stringify(v));
+        });
+        review[id] = targets.slice();
+      });
+    }
+
+    fan(s.edits);
+    fan(s.aliases);
+    fan(s.deleted);
+
+    // 학습 카드는 "id|drill" 이다. id 만 갈아끼운다.
+    Object.keys(s.cards || {}).forEach(function (k) {
+      var i = k.indexOf('|');
+      if (i < 0) return;
+      var id = k.slice(0, i), tail = k.slice(i);
+      var targets = map[id];
+      if (!targets) return;
+      var v = s.cards[k];
+      delete s.cards[k];
+      targets.forEach(function (nid) {
+        if (!(nid + tail in s.cards)) s.cards[nid + tail] = JSON.parse(JSON.stringify(v));
+      });
+    });
+
+    if (Object.keys(review).length) s.splitReview = review;
+    return true;
+  }
+
+  /*
+   * 저장본 올리기.
+   *
+   * 예전 migrate 는 cards 와 settings 만 남기고 edits·aliases·deleted·log 를
+   * 버렸다. 버전을 올리는 순간 적어 둔 뜻이 통째로 날아간다. 전부 이어받는다.
+   */
   function migrate(old) {
+    if (!old || typeof old !== 'object') return fresh();
+
     var s = fresh();
-    if (old && old.cards) s.cards = old.cards;
-    if (old && old.settings) s.settings = Object.assign(s.settings, old.settings);
+    ['cards', 'edits', 'aliases', 'deleted'].forEach(function (k) {
+      if (old[k] && typeof old[k] === 'object') s[k] = old[k];
+    });
+    if (Array.isArray(old.added)) s.added = old.added;
+    if (Array.isArray(old.log)) s.log = old.log;
+    if (typeof old.streak === 'number') s.streak = old.streak;
+    if (old.lastDay) s.lastDay = old.lastDay;
+    if (old._ts) s._ts = old._ts;
+    if (old.splitReview) s.splitReview = old.splitReview;
+    if (old.settings) s.settings = Object.assign(s.settings, old.settings);
+
+    if ((old.version || 1) < 2) {
+      // 단어 데이터가 아직 없으면 버전을 올리지 않는다. 다음에 다시 시도한다.
+      if (!splitIds(s)) {
+        s.version = old.version || 1;
+        return s;
+      }
+    }
+    s.version = VERSION;
     return s;
   }
 
@@ -322,6 +419,18 @@
     saveNow();
   }
 
+  /** 동음이의어가 나뉘면서 뜻이 양쪽에 복사된 항목. 사람이 한 번 봐야 한다. */
+  function splitReview() {
+    var s = load();
+    return s.splitReview || null;
+  }
+
+  function clearSplitReview() {
+    var s = load();
+    delete s.splitReview;
+    saveNow();
+  }
+
   /** 동기화가 병합한 결과로 통째로 갈아끼운다 */
   function replaceAll(next) {
     state = next;
@@ -339,6 +448,7 @@
     deleteWord: deleteWord, restoreWord: restoreWord, isDeleted: isDeleted,
     deletedCount: deletedCount, dropDeleted: dropDeleted,
     exportBackup: exportBackup, importBackup: importBackup, reset: reset,
+    splitReview: splitReview, clearSplitReview: clearSplitReview,
     replaceAll: replaceAll,
     DEFAULT_SETTINGS: DEFAULT_SETTINGS
   };

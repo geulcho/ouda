@@ -165,7 +165,7 @@ def main():
             print("  X " + p)
         return 1
     print("\nOK")
-    print("  호스팅: dist 폴더를 Cloudflare Pages 에 끌어다 놓기")
+    print("  배포: main 에 푸시하면 Actions 가 Pages 로 올린다")
     print("  오프라인: dist/single.html 하나만 폰에 넣기")
     return 0
 

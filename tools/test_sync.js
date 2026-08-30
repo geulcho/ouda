@@ -176,6 +176,67 @@ eq('없던 필드여도 안 터짐',   Object.keys(Sync.mergeAliases(undefined, 
 mAli['n:zug'].push('오염');
 eq('원본 불변', pcAli['n:zug'].length, 1);
 
+// ---------------------------------------------------------------- 로컬 기록 이관
+//
+// file:// 로 쓰던 기록을 계정으로 옮기는 경우.
+// 계정 쪽은 비어 있고, 파일 쪽에 전부 들어 있다. 하나도 잃으면 안 된다.
+
+console.log('로컬 백업을 빈 계정으로 이관');
+var backup = {
+  version: 1,
+  settings: { newPerDay: 40, levels: ['B1'], pos: ['noun'], drills: ['gender'] },
+  cards: { 'n:Zug|gender': { box: 5, ts: T, seen: 9 },
+           'v:gehen|forms': { box: 2, ts: T - 100, seen: 3 } },
+  edits: { 'n:Zug': { ko: '기차', _ts: T } },
+  aliases: { 'n:Zug': ['열차'] },
+  deleted: { 'adj:깨진것': T },
+  added: [{ id: 'n:추가', pos: 'noun' }],
+  log: [{ d: '2026-08-01', n: 30, right: 25 }],
+  streak: 7,
+  lastDay: '2026-08-01'
+  // _ts 가 없다 — 동기화를 한 번도 안 했기 때문이다
+};
+var emptyAccount = {
+  version: 1,
+  settings: { newPerDay: 15, levels: ['A1', 'A2', 'B1', 'B2'], pos: ['noun', 'verb'], drills: null },
+  cards: {}, edits: {}, aliases: {}, deleted: {}, added: [], log: [], streak: 0, lastDay: null
+};
+
+// ui.js 의 migrate() 가 하는 것: _ts 를 찍어 가져온 쪽을 기준으로 만든다
+var stamped = JSON.parse(JSON.stringify(backup));
+stamped._ts = T + 1000;
+var moved = Sync.merge(emptyAccount, stamped);
+
+eq('카드 2개 다 옮겨짐', Object.keys(moved.cards).length, 2);
+eq('진도 유지',          moved.cards['n:Zug|gender'].box, 5);
+eq('뜻 옮겨짐',          moved.edits['n:Zug'].ko, '기차');
+eq('답지 옮겨짐',        moved.aliases['n:Zug'][0], '열차');
+eq('지운 것 옮겨짐',     !!moved.deleted['adj:깨진것'], true);
+eq('추가 단어 옮겨짐',   moved.added.length, 1);
+eq('학습로그 옮겨짐',    moved.log.length, 1);
+eq('연속일 유지',        moved.streak, 7);
+eq('설정 옮겨짐',        moved.settings.newPerDay, 40);
+eq('레벨 선택 옮겨짐',   moved.settings.levels.length, 1);
+
+console.log('_ts 를 안 찍으면 설정이 버려진다 (그래서 찍는다)');
+var naive = Sync.merge(emptyAccount, backup);
+eq('설정이 계정 것으로 남음', naive.settings.newPerDay, 15);
+eq('카드는 그래도 옮겨짐',    Object.keys(naive.cards).length, 2);
+
+console.log('두 번 옮겨도 안 망가진다');
+var twice = Sync.merge(moved, stamped);
+eq('카드 그대로',  Object.keys(twice.cards).length, 2);
+eq('진도 그대로',  twice.cards['n:Zug|gender'].box, 5);
+eq('답지 안 늘어남', twice.aliases['n:Zug'].length, 1);
+eq('추가 안 중복',  twice.added.length, 1);
+
+console.log('계정에 이미 더 최신 진도가 있으면 그쪽을 지킨다');
+var busyAccount = JSON.parse(JSON.stringify(emptyAccount));
+busyAccount.cards['n:Zug|gender'] = { box: 7, ts: T + 5000, seen: 20 };
+var safe = Sync.merge(busyAccount, stamped);
+eq('최신 진도 안 밀림', safe.cards['n:Zug|gender'].box, 7);
+eq('파일 쪽 다른 카드도 살아남음', !!safe.cards['v:gehen|forms'], true);
+
 // ---------------------------------------------------------------- 켜지는 조건
 //
 // 동기화는 '설정이 있고 + 로그인했을 때' 만 켜진다.

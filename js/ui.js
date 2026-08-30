@@ -2756,6 +2756,103 @@
 
       if (admin) paintAdmin();
       else box.appendChild(note('뜻은 운영자가 채웁니다. 새로 채워지면 자동으로 받습니다.'));
+      paintMigrate();
+    }
+
+    /*
+     * 로컬에서 쓰던 기록을 이 계정으로 옮긴다.
+     *
+     * file:// 로 연 앱과 배포 사이트는 localStorage 가 완전히 분리돼 있어서,
+     * 백업 파일을 거치는 것 말고는 옮길 방법이 없다. 브라우저가 그렇게 막는다.
+     *
+     * 덮어쓰지 않고 병합한다 — 계정에 이미 쌓인 것과 파일에 있는 것 중
+     * 카드마다 최신을 고른다. 그래서 여러 번 눌러도 안전하다.
+     */
+    function paintMigrate() {
+      var msg = el('p', { class: 'muted small' });
+
+      box.appendChild(el('h4', { class: 'adminhead', text: '로컬 기록 가져오기' }));
+      box.appendChild(el('p', { class: 'muted small', text:
+        'PC 에서 index.html 을 직접 열어 쓰던 기록을 이 계정으로 옮깁니다. ' +
+        '그 앱의 설정 > 백업 > 기록 내려받기 로 받은 파일을 고르세요.' }));
+
+      box.appendChild(el('div', { class: 'actions leftish' }, [
+        el('button', { class: 'btn ghost', text: '백업 파일에서 옮기기', onclick: function () {
+          if (busy) return;
+          var inp = el('input', { type: 'file', accept: '.json' });
+          inp.addEventListener('change', function () {
+            var f = inp.files[0];
+            if (!f) return;
+            var r = new FileReader();
+            r.onload = function () { migrate(r.result, msg); };
+            r.readAsText(f);
+          });
+          inp.click();
+        } })
+      ]));
+      box.appendChild(msg);
+    }
+
+    /** 백업 JSON 을 병합해 넣고, 사전과 개인기록으로 각각 올린다 */
+    function migrate(text, msg) {
+      var parsed;
+      try {
+        parsed = JSON.parse(text);
+        if (!parsed || typeof parsed !== 'object' || !parsed.cards) {
+          throw new Error('백업 파일 형식이 아닙니다.');
+        }
+      } catch (e) {
+        msg.textContent = '읽지 못했습니다: ' + e.message;
+        return;
+      }
+
+      var cards = Object.keys(parsed.cards || {}).length;
+      var metas = Object.keys(parsed.edits || {}).length;
+      var admin = Au.isAdmin();
+
+      var plan = '학습 카드 ' + cards.toLocaleString() + '개' +
+                 (metas ? ' · 뜻/수정 ' + metas.toLocaleString() + '개' : '');
+      if (metas && !admin) {
+        plan += String.fromCharCode(10) +
+                '(뜻은 운영자만 발행할 수 있어 이 기기에만 남습니다)';
+      }
+      if (!global.confirm(plan + String.fromCharCode(10) + String.fromCharCode(10) +
+                          '이 계정으로 옮깁니다. 계속할까요?')) return;
+
+      busy = true;
+      msg.textContent = '옮기는 중…';
+
+      /*
+       * 동기화를 한 번도 안 한 백업에는 _ts 가 없다 (_ts 는 올릴 때 찍힌다).
+       * 그대로 병합하면 merge() 가 설정을 고를 때 remote._ts(0) > local._ts(0)
+       * 이 false 라서 가져온 설정이 통째로 버려진다 — 레벨·품사·드릴 선택이
+       * 초기화된다. 이관에서는 가져온 파일이 기준이므로 시각을 찍어 준다.
+       */
+      if (!parsed._ts) parsed._ts = Date.now();
+
+      // 덮어쓰지 않고 병합 — 카드마다 최신을 고른다 (Sync.merge 가 검증된 로직)
+      var merged = Sy ? Sy.merge(S.load(), parsed) : parsed;
+      S.replaceAll(merged);
+      reload();
+
+      // 운영자면 뜻을 사전으로, 그다음 진도를 개인기록으로
+      var step = (admin && Dc && Dc.pendingCount())
+        ? Dc.publishLocal().then(function (n) { return '뜻 ' + n + '개 발행'; })
+        : Promise.resolve(null);
+
+      step.then(function (published) {
+        return (Sy ? Sy.syncNow() : Promise.resolve()).then(function () {
+          busy = false;
+          reload();
+          paint();
+          global.alert('옮겼습니다.' + String.fromCharCode(10) +
+                       '학습 카드 ' + cards.toLocaleString() + '개' +
+                       (published ? String.fromCharCode(10) + published : ''));
+        });
+      })['catch'](function (e) {
+        busy = false;
+        msg.textContent = '실패: ' + e.message + ' (기록은 이 기기에 남아 있습니다)';
+      });
     }
 
     // ------------------------------------------------ 운영자 전용
@@ -2832,8 +2929,14 @@
       if (!f) return;
       var r = new FileReader();
       r.onload = function () {
-        try { S.importBackup(r.result); alert('불러왔습니다.'); go('home'); }
-        catch (e) { alert('실패: ' + e.message); }
+        try {
+          S.importBackup(r.result);
+          WORDS = loadWords();          // 가져온 뜻이 바로 보이게
+          POOL = buildPool();
+          if (global.Sync) global.Sync.schedulePush();   // 계정에도 올린다
+          alert('불러왔습니다.');
+          go('home');
+        } catch (e) { alert('실패: ' + e.message); }
       };
       r.readAsText(f);
     });
